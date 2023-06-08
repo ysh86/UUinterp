@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <dirent.h>
+#include <arpa/inet.h>
 
 // for PATH_MAX
 #ifdef __linux__
@@ -19,6 +20,11 @@ struct cpu_tag;
 typedef struct cpu_tag cpu_t;
 #endif
 
+// aout
+#define MAGIC_BE 0x04000301
+#define IS_MAGIC_BE(X) ((ntohl(X) & 0xff0fffff) == MAGIC_BE)
+#define IS_SEPARATE(X) (     ((X) & 0x00200000) ? 0x20 : 0)
+
 struct machine_tag {
     // emulate syscall opendir, closedir and readdir
     int dirfd;
@@ -32,7 +38,10 @@ struct machine_tag {
     size_t argsbytes;
 
     // aout
-    uint16_t aoutHeader[8];
+    union {
+        uint16_t header[8];
+        uint32_t headerBE[8];
+    } aout;
 
     // memory
     uint8_t virtualMemory[64 * 1024];

@@ -17,13 +17,32 @@ bool load(machine_t *pm, const char *src) {
 
     size_t n;
     size_t size;
-    size = sizeof(pm->aoutHeader);
-    n = fread(pm->aoutHeader, 1, size, fp);
+    size = sizeof(pm->aout.header);
+    n = fread(pm->aout.header, 1, size, fp);
     if (n != size) {
         fclose(fp);
         return false;
     }
-    // TODO: endian
+
+    if (!IS_MAGIC_BE(pm->aout.headerBE[0])) {
+        // PDP-11 V6
+        // TODO: endian
+    } else {
+        // m68k Minix
+        n = fread(&pm->aout.headerBE[4], 1, size, fp);
+        if (n != size) {
+            fclose(fp);
+            return false;
+        }
+
+        pm->aout.headerBE[1] = ntohl(pm->aout.headerBE[1]) & 0xff;
+        pm->aout.headerBE[2] = ntohl(pm->aout.headerBE[2]);
+        pm->aout.headerBE[3] = ntohl(pm->aout.headerBE[3]);
+        pm->aout.headerBE[4] = ntohl(pm->aout.headerBE[4]);
+        pm->aout.headerBE[5] = ntohl(pm->aout.headerBE[5]);
+        pm->aout.headerBE[6] = ntohl(pm->aout.headerBE[6]);
+        pm->aout.headerBE[7] = ntohl(pm->aout.headerBE[7]);
+    }
 
     size = sizeof(pm->virtualMemory);
     n = fread(pm->virtualMemory, 1, size, fp);
