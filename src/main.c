@@ -4,8 +4,13 @@
 #include <assert.h>
 
 #include "machine.h"
+#ifdef UU_M68K_MINIX
+#include "../m68k/src/cpu.h"
+#include "syscall.h"
+#else
 #include "../pdp11/src/cpu.h"
 #include "syscall.h"
+#endif
 
 int main(int argc, char *argv[]) {
     //////////////////////////
@@ -82,10 +87,10 @@ int main(int argc, char *argv[]) {
         memset(&machine.virtualMemory[machine.bssStart], 0, machine.aout.header[3]);
     } else {
         // m68k Minix
-        machine.textStart = 0x400;
+        machine.textStart = SIZE_OF_VECTORS;
         if (machine.textStart != 0) {
             memmove(&machine.virtualMemory[machine.textStart], &machine.virtualMemory[0], sizeof(machine.virtualMemory)-machine.textStart);
-            memset(&machine.virtualMemory[0], 0, machine.textStart);
+            memset(&machine.virtualMemory[0], 0, machine.textStart); // clear vectors
         }
         machine.textEnd = machine.textStart + machine.aout.headerBE[2];
         if (IS_SEPARATE(machine.aout.headerBE[0])) {
@@ -174,14 +179,36 @@ int main(int argc, char *argv[]) {
         0, machine.textStart);
 
     pushArgs(&cpu, machine.argc, machine.args, machine.argsbytes);
-#if 0
+#if 1
     // debug dump
+    FILE *fp = fopen("dump.bin", "wb");
+    fwrite(machine.virtualMemory, 1, sizeof(machine.virtualMemory), fp);
+    fclose(fp);
+
+    printf("/ argc: %d\n", argc);
     for (int i = 0; i < argc; i++) {
         const char *pa = argv[i];
         printf("/ argv[%d]: %s\n", i, pa);
     }
     printf("\n");
-    printf("/ stack: sp = %04x\n", cpu.sp);
+    printf("/ pc: %08x\n", cpu.pc);
+    for (int j = 0; j < 256; j += 16) {
+        printf("/ %04x:", j);
+        for (int i = 0; i < 16; i++) {
+            printf(" %02x", machine.virtualMemory[j + i]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+    for (int j = cpu.pc; j < cpu.pc+256; j += 16) {
+        printf("/ %04x:", j);
+        for (int i = 0; i < 16; i++) {
+            printf(" %02x", machine.virtualMemory[j + i]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+    printf("/ stack: sp = %08x\n", cpu.sp);
     int maxj = sizeof(machine.virtualMemory);
     for (int j = maxj - 256; j < maxj; j += 16) {
         printf("/ %04x:", j);
@@ -204,7 +231,9 @@ int main(int argc, char *argv[]) {
         decode(&cpu);
         exec(&cpu);
 
-        //disasm(&cpu);
+#if 1
+        disasm(&cpu);
+#endif
     }
     goto reloaded;
 

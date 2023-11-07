@@ -61,6 +61,7 @@ struct machine_tag {
 typedef struct machine_tag machine_t;
 #endif
 
+bool serializeArgvReal(machine_t *pm, int argc, char *argv[]);
 bool load(machine_t *pm, const char *src);
 
 static inline uint8_t *mmuV2R(machine_t *pm, uint16_t vaddr) {

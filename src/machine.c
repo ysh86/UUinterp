@@ -1,7 +1,30 @@
 #include <stdio.h>
+#include <assert.h>
 
 #include "machine.h"
 #include "util.h"
+
+bool serializeArgvReal(machine_t *pm, int argc, char *argv[]) {
+    assert(argv[argc] == NULL);
+
+    size_t nc = 0;
+    for (int i = 0; i < argc; i++) {
+        const char *pa = argv[i];
+        do {
+            pm->args[nc++] = *pa;
+            if (nc >= sizeof(pm->args) - 1) {
+                return false;
+            }
+        } while (*pa++ != '\0');
+    }
+    if (nc & 1) {
+        pm->args[nc++] = '\0';
+    }
+
+    pm->argc = argc;
+    pm->argsbytes = nc;
+    return true;
+}
 
 bool load(machine_t *pm, const char *src) {
     char name[PATH_MAX];
