@@ -64,9 +64,14 @@ typedef struct machine_tag machine_t;
 bool serializeArgvReal(machine_t *pm, int argc, char *argv[]);
 bool load(machine_t *pm, const char *src);
 
+uint16_t pushArgs16(machine_t *pm, uint16_t stackAddr);
+uint32_t pushArgs(machine_t *pm, uint32_t stackAddr);
+
 static inline uint8_t *mmuV2R(machine_t *pm, uint16_t vaddr) {
+    //return (vaddr != 0) ? &pm->virtualMemory[vaddr] : NULL;
     return &pm->virtualMemory[vaddr];
 }
 static inline uint16_t mmuR2V(machine_t *pm, uint8_t *raddr) {
+    //return (raddr != NULL) ? (raddr - pm->virtualMemory) & 0xffff : 0;
     return (raddr - pm->virtualMemory) & 0xffff;
 }

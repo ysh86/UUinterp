@@ -51,9 +51,11 @@ int main(int argc, char *argv[]) {
     // memory
     //////////////////////////
     reloaded:
+    uint32_t sp;
     if (!IS_MAGIC_BE(machine.aout.headerBE[0])) {
         // PDP-11 V6
-        machine.textStart = 0;
+        machine.textStart = SIZE_OF_VECTORS;
+        assert(machine.textStart == 0); // vectors not implemented
         machine.textEnd = machine.textStart + machine.aout.header[1];
         machine.dataStart = machine.textEnd;
         if (machine.aout.header[0] == 0x0108) {
@@ -85,6 +87,9 @@ int main(int argc, char *argv[]) {
 
         // bss
         memset(&machine.virtualMemory[machine.bssStart], 0, machine.aout.header[3]);
+
+        // stack
+        sp = pushArgs16(&machine, 0);
     } else {
         // m68k Minix
         machine.textStart = SIZE_OF_VECTORS;
@@ -158,6 +163,9 @@ int main(int argc, char *argv[]) {
                 addr += B;
             }
         }
+
+        // stack
+        sp = pushArgs(&machine, 0);
     }
 
     //////////////////////////
@@ -176,51 +184,51 @@ int main(int argc, char *argv[]) {
         (mmu_r2v_t)mmuR2V,
         (syscall_t)mysyscall,
         (syscall_string_t)syscallString,
-        0, machine.textStart);
-
-    pushArgs(&cpu, machine.argc, machine.args, machine.argsbytes);
+        sp, machine.textStart);
 #if 0
-    // debug dump
-    FILE *fp = fopen("dump.bin", "wb");
-    fwrite(machine.virtualMemory, 1, sizeof(machine.virtualMemory), fp);
-    fclose(fp);
+    {
+        // debug dump
+        FILE *fp = fopen("dump.bin", "wb");
+        fwrite(machine.virtualMemory, 1, sizeof(machine.virtualMemory), fp);
+        fclose(fp);
 
-    const uint32_t pc = getPC(&cpu);
-    const uint32_t sp = getSP(&cpu);
+        const uint32_t pc = getPC(&cpu);
+        const uint32_t sp = getSP(&cpu);
 
-    printf("/ argc: %d\n", argc);
-    for (int i = 0; i < argc; i++) {
-        const char *pa = argv[i];
-        printf("/ argv[%d]: %s\n", i, pa);
-    }
-    printf("\n");
-    printf("/ pc: %08x\n", pc);
-    for (int j = 0; j < 256; j += 16) {
-        printf("/ %04x:", j);
-        for (int i = 0; i < 16; i++) {
-            printf(" %02x", machine.virtualMemory[j + i]);
+        printf("/ argc: %d\n", argc);
+        for (int i = 0; i < argc; i++) {
+            const char *pa = argv[i];
+            printf("/ argv[%d]: %s\n", i, pa);
+        }
+        printf("\n");
+        printf("/ pc: %08x\n", pc);
+        for (int j = 0; j < 256; j += 16) { // TODO: 関数化せよ
+            printf("/ %04x:", j);
+            for (int i = 0; i < 16; i++) {
+                printf(" %02x", machine.virtualMemory[j + i]);
+            }
+            printf("\n");
+        }
+        printf("\n");
+        for (int j = pc; j < pc+256; j += 16) {
+            printf("/ %04x:", j);
+            for (int i = 0; i < 16; i++) {
+                printf(" %02x", machine.virtualMemory[j + i]);
+            }
+            printf("\n");
+        }
+        printf("\n");
+        printf("/ stack: sp = %08x\n", sp);
+        int maxj = sizeof(machine.virtualMemory);
+        for (int j = maxj - 256; j < maxj; j += 16) {
+            printf("/ %04x:", j);
+            for (int i = 0; i < 16; i++) {
+                printf(" %02x", machine.virtualMemory[j + i]);
+            }
+            printf("\n");
         }
         printf("\n");
     }
-    printf("\n");
-    for (int j = pc; j < pc+256; j += 16) {
-        printf("/ %04x:", j);
-        for (int i = 0; i < 16; i++) {
-            printf(" %02x", machine.virtualMemory[j + i]);
-        }
-        printf("\n");
-    }
-    printf("\n");
-    printf("/ stack: sp = %08x\n", sp);
-    int maxj = sizeof(machine.virtualMemory);
-    for (int j = maxj - 256; j < maxj; j += 16) {
-        printf("/ %04x:", j);
-        for (int i = 0; i < 16; i++) {
-            printf(" %02x", machine.virtualMemory[j + i]);
-        }
-        printf("\n");
-    }
-    printf("\n");
 #endif
 
     while (1) {

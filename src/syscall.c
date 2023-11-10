@@ -107,7 +107,27 @@ static void convstat(uint8_t *pi, const struct stat* ps) {
     //pi[35];
 }
 
+#ifdef UU_M68K_MINIX
 void mysyscall(machine_t *pm) {
+    /*
+            uint16_t m_source = ntohs(*(uint16_t *)(theCPU->mmuV2R(theCPU->ctx, m68k_get_reg(NULL, M68K_REG_A0))));
+            uint16_t m_type = ntohs(*(uint16_t *)(theCPU->mmuV2R(theCPU->ctx, m68k_get_reg(NULL, M68K_REG_A0)+2)));
+            int16_t status = ntohs(*(uint16_t *)(theCPU->mmuV2R(theCPU->ctx, m68k_get_reg(NULL, M68K_REG_A0)+4)));
+            printf("/ syscall: src=%d, type=%d, %d\n", m_source, m_type, status);
+            pm->cpu->syscallID = m_type;
+
+            if (m_type == 1) {
+                exit(status);
+            }
+    */
+   return;
+}
+void syscallString(machine_t *pm, char *str, size_t size, uint8_t id) {
+}
+#else
+void mysyscall(machine_t *pm) {
+
+
     uint16_t addr;
 
     uint16_t word0 = 0;
@@ -735,3 +755,4 @@ void syscallString(machine_t *pm, char *str, size_t size, uint8_t id) {
         break;
     }
 }
+#endif

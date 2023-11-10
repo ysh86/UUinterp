@@ -78,3 +78,92 @@ bool load(machine_t *pm, const char *src) {
 
     return true;
 }
+
+// 16-bit LE
+static inline void write16(uint8_t *p, uint16_t data) {
+    p[0] = data & 0xff;
+    p[1] = data >> 8;
+}
+
+uint16_t pushArgs16(machine_t *pm, uint16_t stackAddr) {
+    // argc, argv[0]...argv[na-1], -1, buf
+    const uint16_t na = pm->argc;
+    const uint16_t vsp = stackAddr - (2 + na * 2 + 2 + pm->argsbytes);
+    uint8_t *rsp = mmuV2R(pm, vsp);
+    uint8_t *pbuf = rsp + 2 + na * 2 + 2;
+
+    // argc
+    write16(rsp, na);
+    rsp += 2;
+
+    // argv & buf
+    const uint8_t *pa = pm->args;
+    for (int i = 0; i < na; i++) {
+        uint16_t vaddr = mmuR2V(pm, pbuf);
+        write16(rsp, vaddr);
+        rsp += 2;
+        do {
+            *pbuf++ = *pa;
+        } while (*pa++ != '\0');
+    }
+
+    uint16_t vaddr = mmuR2V(pm, pbuf);
+    if (vaddr & 1) {
+        *pbuf = '\0'; // alignment
+    }
+
+    // -1
+    write16(rsp, 0xffff);
+
+    return vsp;
+}
+
+// 32-bit BE
+static inline void write32(uint8_t *p, uint32_t data) {
+    p[0] = data >> 24;
+    p[1] = (data >> 16) & 0xff;
+    p[2] = (data >> 8) & 0xff;
+    p[3] = data & 0xff;
+}
+
+static inline void writeAddr16(uint8_t *p, uint16_t vaddr) {
+    p[0] = 0;
+    p[1] = 0;
+    p[2] = vaddr >> 8;
+    p[3] = vaddr & 0xff;
+}
+
+// TODO: 32bit
+// TODO: virtual memory page をまたぐと動かない
+uint32_t pushArgs(machine_t *pm, uint32_t stackAddr) {
+    // argc, argv[0]...argv[na-1], -1, buf
+    const uint32_t na = pm->argc;
+    const uint16_t vsp = stackAddr - (4 + na * 4 + 4 + pm->argsbytes);
+    uint8_t *rsp = mmuV2R(pm, vsp);
+    uint8_t *pbuf = rsp + 4 + na * 4 + 4;
+
+    // argc
+    write32(rsp, na);
+    rsp += 4;
+
+    // argv & buf
+    const uint8_t *pa = pm->args;
+    for (int i = 0; i < na; i++) {
+        uint16_t vaddr = mmuR2V(pm, pbuf);
+        writeAddr16(rsp, vaddr);
+        rsp += 4;
+        do {
+            *pbuf++ = *pa;
+        } while (*pa++ != '\0');
+    }
+
+    uint16_t vaddr = mmuR2V(pm, pbuf);
+    if (vaddr & 1) {
+        *pbuf = '\0'; // alignment
+    }
+
+    // -1
+    write32(rsp, 0xffffffff);
+
+    return vsp;
+}
