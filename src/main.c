@@ -179,11 +179,14 @@ int main(int argc, char *argv[]) {
         0, machine.textStart);
 
     pushArgs(&cpu, machine.argc, machine.args, machine.argsbytes);
-#if 1
+#if 0
     // debug dump
     FILE *fp = fopen("dump.bin", "wb");
     fwrite(machine.virtualMemory, 1, sizeof(machine.virtualMemory), fp);
     fclose(fp);
+
+    const uint32_t pc = getPC(&cpu);
+    const uint32_t sp = getSP(&cpu);
 
     printf("/ argc: %d\n", argc);
     for (int i = 0; i < argc; i++) {
@@ -191,7 +194,7 @@ int main(int argc, char *argv[]) {
         printf("/ argv[%d]: %s\n", i, pa);
     }
     printf("\n");
-    printf("/ pc: %08x\n", cpu.pc);
+    printf("/ pc: %08x\n", pc);
     for (int j = 0; j < 256; j += 16) {
         printf("/ %04x:", j);
         for (int i = 0; i < 16; i++) {
@@ -200,7 +203,7 @@ int main(int argc, char *argv[]) {
         printf("\n");
     }
     printf("\n");
-    for (int j = cpu.pc; j < cpu.pc+256; j += 16) {
+    for (int j = pc; j < pc+256; j += 16) {
         printf("/ %04x:", j);
         for (int i = 0; i < 16; i++) {
             printf(" %02x", machine.virtualMemory[j + i]);
@@ -208,7 +211,7 @@ int main(int argc, char *argv[]) {
         printf("\n");
     }
     printf("\n");
-    printf("/ stack: sp = %08x\n", cpu.sp);
+    printf("/ stack: sp = %08x\n", sp);
     int maxj = sizeof(machine.virtualMemory);
     for (int j = maxj - 256; j < maxj; j += 16) {
         printf("/ %04x:", j);
@@ -221,9 +224,10 @@ int main(int argc, char *argv[]) {
 #endif
 
     while (1) {
+        const uint32_t pc = getPC(&cpu);
         // TODO: debug
-        //assert(cpu.pc < machine.textEnd);
-        if (cpu.pc >= 0xffff) {
+        //assert(pc < machine.textEnd);
+        if (pc >= 0xffff) {
             break;
         }
 
@@ -231,7 +235,7 @@ int main(int argc, char *argv[]) {
         decode(&cpu);
         exec(&cpu);
 
-#if 1
+#if 0
         disasm(&cpu);
 #endif
     }
