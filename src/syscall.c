@@ -15,61 +15,13 @@
 
 #include "syscall.h"
 #include "machine.h"
+#ifdef UU_M68K_MINIX
+#include "../m68k/src/cpu.h"
+#else
 #include "../pdp11/src/cpu.h"
 #include "../pdp11/src/util.h"
+#endif
 #include "util.h"
-
-bool serializeArgvReal(machine_t *pm, int argc, char *argv[]) {
-    assert(argv[argc] == NULL);
-
-    size_t nc = 0;
-    for (int i = 0; i < argc; i++) {
-        const char *pa = argv[i];
-        do {
-            pm->args[nc++] = *pa;
-            if (nc >= sizeof(pm->args) - 1) {
-                return false;
-            }
-        } while (*pa++ != '\0');
-    }
-    if (nc & 1) {
-        pm->args[nc++] = '\0';
-    }
-
-    pm->argc = argc;
-    pm->argsbytes = nc;
-    return true;
-}
-
-static int serializeArgvVirt(machine_t *pm, uint8_t *argv) {
-    uint16_t na = 0;
-    uint16_t nc = 0;
-
-    uint16_t vaddr = read16(false, argv);
-    argv += 2;
-    while (vaddr != 0) {
-        const char *pa = (const char *)&pm->virtualMemory[vaddr];
-        // debug
-        //fprintf(stderr, "/ [DBG]   argv[%d]: %s\n", na, pa);
-        vaddr = read16(false, argv);
-        argv += 2;
-        na++;
-
-        do {
-            pm->args[nc++] = *pa;
-            if (nc >= sizeof(pm->args) - 1) {
-                return -1;
-            }
-        } while (*pa++ != '\0');
-    }
-    if (nc & 1) {
-        pm->args[nc++] = '\0';
-    }
-
-    pm->argc = na;
-    pm->argsbytes = nc;
-    return 0;
-}
 
 static void convstat(uint8_t *pi, const struct stat* ps) {
     struct inode {
@@ -129,7 +81,209 @@ static void convstat(uint8_t *pi, const struct stat* ps) {
     //pi[35];
 }
 
+#ifdef UU_M68K_MINIX
+
+#define M1                 1
+#define M3                 3
+#define M4                 4
+#define M3_STRING         14
+
+typedef struct {uint16_t m1i1, m1i2, m1i3; uint8_t *m1p1, *m1p2, *m1p3;} mess_1;
+typedef struct {uint16_t m2i1, m2i2, m2i3; uint32_t m2l1, m2l2; uint8_t *m2p1;} mess_2;
+typedef struct {uint16_t m3i1, m3i2; uint8_t *m3p1; char m3ca1[M3_STRING];} mess_3;
+typedef struct {uint32_t m4l1, m4l2, m4l3, m4l4;} mess_4;
+typedef struct {uint8_t m5c1, m5c2; int m5i1, m5i2; uint32_t m5l1, m5l2, m5l3;} mess_5;
+typedef struct {uint16_t m6i1, m6i2, m6i3; uint32_t m6l1; void (*m6f1)();} mess_6;
+
+typedef struct {
+  uint16_t m_source;                 /* who sent the message */
+  uint16_t m_type;                   /* what kind of message is it */
+  union {
+        mess_1 m_m1;
+        mess_2 m_m2;
+        mess_3 m_m3;
+        mess_4 m_m4;
+        mess_5 m_m5;
+        mess_6 m_m6;
+  } m_u;
+} message;
+
+#define m1_i1  m_u.m_m1.m1i1
+#define m1_i2  m_u.m_m1.m1i2
+#define m1_i3  m_u.m_m1.m1i3
+#define m1_p1  m_u.m_m1.m1p1
+#define m1_p2  m_u.m_m1.m1p2
+#define m1_p3  m_u.m_m1.m1p3
+
+#define m2_i1  m_u.m_m2.m2i1
+#define m2_i2  m_u.m_m2.m2i2
+#define m2_i3  m_u.m_m2.m2i3
+#define m2_l1  m_u.m_m2.m2l1
+#define m2_l2  m_u.m_m2.m2l2
+#define m2_p1  m_u.m_m2.m2p1
+
+#define m3_i1  m_u.m_m3.m3i1
+#define m3_i2  m_u.m_m3.m3i2
+#define m3_p1  m_u.m_m3.m3p1
+#define m3_ca1 m_u.m_m3.m3ca1
+
+
+#define m4_l1  m_u.m_m4.m4l1
+#define m4_l2  m_u.m_m4.m4l2
+#define m4_l3  m_u.m_m4.m4l3
+#define m4_l4  m_u.m_m4.m4l4
+
+#define m5_c1  m_u.m_m5.m5c1
+#define m5_c2  m_u.m_m5.m5c2
+#define m5_i1  m_u.m_m5.m5i1
+#define m5_i2  m_u.m_m5.m5i2
+#define m5_l1  m_u.m_m5.m5l1
+#define m5_l2  m_u.m_m5.m5l2
+#define m5_l3  m_u.m_m5.m5l3
+
+#define m6_i1  m_u.m_m6.m6i1
+#define m6_i2  m_u.m_m6.m6i2
+#define m6_i3  m_u.m_m6.m6i3
+#define m6_l1  m_u.m_m6.m6l1
+#define m6_f1  m_u.m_m6.m6f1
+
+
+#define MM                 0
+#define FS                 1
+
+#define SEND               1    /* function code for sending messages */
+#define RECEIVE            2    /* function code for receiving messages */
+#define BOTH               3    /* function code for SEND + RECEIVE */
+
+
+void setM1(message *m, uint32_t vraw, machine_t *pm) {
+    uint16_t vaddrH, vaddrL;
+    uint32_t vaddr;
+
+    m->m_source = ntohs(*(uint16_t *)mmuV2R(pm, vraw+0));
+    m->m_type = ntohs(*(uint16_t *)mmuV2R(pm, vraw+2));
+
+    m->m1_i1 = ntohs(*(uint16_t *)mmuV2R(pm, vraw+4));
+    m->m1_i2 = ntohs(*(uint16_t *)mmuV2R(pm, vraw+6));
+    m->m1_i3 = ntohs(*(uint16_t *)mmuV2R(pm, vraw+8));
+
+    vaddrH = ntohs(*(uint16_t *)mmuV2R(pm, vraw+10));
+    vaddrL = ntohs(*(uint16_t *)mmuV2R(pm, vraw+12));
+    vaddr = (vaddrH << 16) | vaddrL;
+    m->m1_p1 = mmuV2R(pm, vaddr);
+
+    vaddrH = ntohs(*(uint16_t *)mmuV2R(pm, vraw+14));
+    vaddrL = ntohs(*(uint16_t *)mmuV2R(pm, vraw+16));
+    vaddr = (vaddrH << 16) | vaddrL;
+    m->m1_p2 = mmuV2R(pm, vaddr);
+
+    vaddrH = ntohs(*(uint16_t *)mmuV2R(pm, vraw+18));
+    vaddrL = ntohs(*(uint16_t *)mmuV2R(pm, vraw+20));
+    vaddr = (vaddrH << 16) | vaddrL;
+    m->m1_p3 = mmuV2R(pm, vaddr);
+
+    return;
+}
+
 void mysyscall(machine_t *pm) {
+    uint16_t sendrec = getD0(pm->cpu) & 0xffff;
+    assert(sendrec == BOTH);
+    setD0(pm->cpu, 0); // succeed sendrec itself
+
+    uint16_t mmfs = getD1(pm->cpu) & 0xffff;
+    uint32_t vraw = getA0(pm->cpu);
+    assert((vraw & 1) == 0); // alignment
+    uint16_t *ptypeBE = (uint16_t *)(mmuV2R(pm, vraw+2));
+
+    message m;
+    ssize_t sret;
+
+    uint16_t syscallID = ntohs(*ptypeBE);
+    switch (syscallID) {
+    case 1:
+        // exit
+        assert(mmfs == MM);
+        setM1(&m, vraw, pm);
+        int status = m.m1_i1;
+        //printf("/ _exit(%d)\n", status);
+        _exit(status);
+        break;
+    case 4:
+        // write
+        assert(mmfs == FS);
+        setM1(&m, vraw, pm);
+        int fd = m.m1_i1;
+        uint8_t *buf = m.m1_p1;
+        size_t nbytes = m.m1_i2;
+        sret = write(fd, buf, nbytes);
+        if (sret < 0) {
+            *ptypeBE = htons(-errno & 0xffff);
+        } else {
+            *ptypeBE = htons(sret & 0xffff);
+        }
+#if 0
+        uint16_t vaddrH = ntohs(*(uint16_t *)mmuV2R(pm, vraw+10));
+        uint16_t vaddrL = ntohs(*(uint16_t *)mmuV2R(pm, vraw+12));
+        printf("=================== %d, %d, %04x_%04x, %ld\n", mmfs, fd, vaddrH, vaddrL, nbytes);
+        printf("=================== %02x,%02x\n", pm->virtualMemory[vaddrL+0], pm->virtualMemory[vaddrL+1]);
+        printf("============ %04lx,%04x\n", sret, mmuR2V(pm, ptypeBE));
+        printf("----- %04lx\n", m.m1_p1 - mmuV2R(pm, 0));
+        {
+            int start = vraw & 0xfff0;
+            for (int j = start; j < start+256; j += 16) {
+                printf("/ %04x:", j);
+                for (int i = 0; i < 16; i++) {
+                    printf(" %02x", *mmuV2R(pm, j + i));
+                }
+                printf("\n");
+            }
+        }
+#endif
+        break;
+    default:
+        assert(0);
+        break;
+    }
+}
+void syscallString(machine_t *pm, char *str, size_t size, uint8_t id) {
+    /*
+    printf("/ syscall: src=%d, type=%d\n", m_source, m_type);
+    */
+}
+#else
+static int serializeArgvVirt(machine_t *pm, uint8_t *argv) {
+    uint16_t na = 0;
+    uint16_t nc = 0;
+
+    uint16_t vaddr = read16(false, argv);
+    argv += 2;
+    while (vaddr != 0) {
+        const char *pa = (const char *)&pm->virtualMemory[vaddr];
+        // debug
+        //fprintf(stderr, "/ [DBG]   argv[%d]: %s\n", na, pa);
+        vaddr = read16(false, argv);
+        argv += 2;
+        na++;
+
+        do {
+            pm->args[nc++] = *pa;
+            if (nc >= sizeof(pm->args) - 1) {
+                return -1;
+            }
+        } while (*pa++ != '\0');
+    }
+    if (nc & 1) {
+        pm->args[nc++] = '\0';
+    }
+
+    pm->argc = na;
+    pm->argsbytes = nc;
+    return 0;
+}
+
+void mysyscall(machine_t *pm) {
+
+
     uint16_t addr;
 
     uint16_t word0 = 0;
@@ -757,3 +911,4 @@ void syscallString(machine_t *pm, char *str, size_t size, uint8_t id) {
         break;
     }
 }
+#endif

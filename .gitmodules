@@ -1,3 +1,9 @@
 [submodule "pdp11"]
 	path = pdp11
 	url = https://github.com/ysh86/pdp11.git
+[submodule "m68k/Musashi"]
+	path = m68k/Musashi
+	url = https://github.com/kstenerud/Musashi.git
+[submodule "m68k"]
+	path = m68k
+	url = https://github.com/ysh86/m68k.git

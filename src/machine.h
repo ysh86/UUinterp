@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <dirent.h>
+#include <arpa/inet.h>
 
 // for PATH_MAX
 #ifdef __linux__
@@ -19,6 +20,11 @@ struct cpu_tag;
 typedef struct cpu_tag cpu_t;
 #endif
 
+// aout
+#define MAGIC_BE 0x04000301
+#define IS_MAGIC_BE(X) ((ntohl(X) & 0xff0fffff) == MAGIC_BE)
+#define IS_SEPARATE(X) (     ((X) & 0x00200000) ? 0x20 : 0)
+
 struct machine_tag {
     // emulate syscall opendir, closedir and readdir
     int dirfd;
@@ -32,7 +38,10 @@ struct machine_tag {
     size_t argsbytes;
 
     // aout
-    uint16_t aoutHeader[8];
+    union {
+        uint16_t header[8];
+        uint32_t headerBE[8];
+    } aout;
 
     // memory
     uint8_t virtualMemory[64 * 1024];
@@ -52,11 +61,17 @@ struct machine_tag {
 typedef struct machine_tag machine_t;
 #endif
 
+bool serializeArgvReal(machine_t *pm, int argc, char *argv[]);
 bool load(machine_t *pm, const char *src);
 
+uint16_t pushArgs16(machine_t *pm, uint16_t stackAddr);
+uint32_t pushArgs(machine_t *pm, uint32_t stackAddr);
+
 static inline uint8_t *mmuV2R(machine_t *pm, uint16_t vaddr) {
+    //return (vaddr != 0) ? &pm->virtualMemory[vaddr] : NULL;
     return &pm->virtualMemory[vaddr];
 }
 static inline uint16_t mmuR2V(machine_t *pm, uint8_t *raddr) {
+    //return (raddr != NULL) ? (raddr - pm->virtualMemory) & 0xffff : 0;
     return (raddr - pm->virtualMemory) & 0xffff;
 }
