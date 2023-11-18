@@ -23,7 +23,7 @@
 #endif
 #include "util.h"
 
-static void convstat(uint8_t *pi, const struct stat* ps) {
+static void convstat16(uint8_t *pi, const struct stat* ps) {
     struct inode {
         char  minor;         /* +0: minor device of i-node */
         char  major;         /* +1: major device */
@@ -185,7 +185,7 @@ void setM1(message *m, uint32_t vraw, machine_t *pm) {
     return;
 }
 
-void mysyscall(machine_t *pm) {
+void mysyscall16(machine_t *pm) {
     uint16_t sendrec = getD0(pm->cpu) & 0xffff;
     assert(sendrec == BOTH);
     setD0(pm->cpu, 0); // succeed sendrec itself
@@ -245,7 +245,7 @@ void mysyscall(machine_t *pm) {
         break;
     }
 }
-void syscallString(machine_t *pm, char *str, size_t size, uint8_t id) {
+void syscallString16(machine_t *pm, char *str, size_t size, uint8_t id) {
     /*
     printf("/ syscall: src=%d, type=%d\n", m_source, m_type);
     */
@@ -281,7 +281,7 @@ static int serializeArgvVirt(machine_t *pm, uint8_t *argv) {
     return 0;
 }
 
-void mysyscall(machine_t *pm) {
+void mysyscall16(machine_t *pm) {
 
 
     uint16_t addr;
@@ -305,7 +305,7 @@ void mysyscall(machine_t *pm) {
             pm->cpu->bin = fetch(pm->cpu);
             pm->cpu->syscallID = pm->cpu->bin & 0x3f;
             assert(pm->cpu->bin - pm->cpu->syscallID == 0104400);
-            mysyscall(pm);
+            mysyscall16(pm);
         }
         // syscall exec(11) overwrites pc!
         if (pm->cpu->syscallID == 11) {
@@ -608,7 +608,7 @@ void mysyscall(machine_t *pm) {
                 pm->cpu->r0 = ret & 0xffff;
                 clearC(pm->cpu);
                 uint8_t *pi = &pm->virtualMemory[word1];
-                convstat(pi, &s);
+                convstat16(pi, &s);
                 // debug
                 //fprintf(stderr, "/ [DBG] stat src: %06o\n", s.st_mode);
                 //fprintf(stderr, "/ [DBG] stat dst: %06o\n", *(uint16_t *)(pi + 4));
@@ -667,7 +667,7 @@ void mysyscall(machine_t *pm) {
                 pm->cpu->r0 = ret & 0xffff;
                 clearC(pm->cpu);
                 uint8_t *pi = &pm->virtualMemory[word0];
-                convstat(pi, &s);
+                convstat16(pi, &s);
                 // debug
                 //fprintf(stderr, "/ [DBG] fstat src: %06o\n", s.st_mode);
                 //fprintf(stderr, "/ [DBG] fstat dst: %06o\n", *(uint16_t *)(pi + 4));
@@ -762,7 +762,7 @@ void mysyscall(machine_t *pm) {
     }
 }
 
-void syscallString(machine_t *pm, char *str, size_t size, uint8_t id) {
+void syscallString16(machine_t *pm, char *str, size_t size, uint8_t id) {
     uint16_t word0 = 0;
     uint16_t word1 = 0;
     switch (id) {
