@@ -165,7 +165,7 @@ int main(int argc, char *argv[]) {
         }
 
         // stack
-        sp = pushArgs(&machine, 0);
+        sp = pushArgs(&machine, sizeof(machine.virtualMemory));
     }
 
     //////////////////////////
