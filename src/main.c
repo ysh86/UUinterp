@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <unistd.h>
+#include <errno.h>
 
 #include "machine.h"
 #ifdef UU_M68K_MINIX
@@ -17,7 +19,7 @@ int main(int argc, char *argv[]) {
     // usage
     //////////////////////////
     if (argc < 3) {
-        fprintf(stderr, "Usage: uuinterp rootdir aout\n");
+        fprintf(stderr, "Usage: uuinterp rootdir aout args...\n");
         return EXIT_FAILURE;
     }
 
@@ -31,12 +33,29 @@ int main(int argc, char *argv[]) {
     // skip vm cmd
     argv++;
     argc--;
+    // cur dir
+    {
+        char *p = getcwd(machine.curdir, sizeof(machine.curdir));
+        if (p == NULL) {
+            fprintf(stderr, "%s\n", strerror(errno));
+            return EXIT_FAILURE;
+        }
+    }
     // root dir
-    snprintf(machine.rootdir, sizeof(machine.rootdir), "%s", *argv);
+    {
+        int ret = chdir(*argv);
+        if (ret != 0) {
+            fprintf(stderr, "%s: %s\n", strerror(errno), *argv);
+            return EXIT_FAILURE;
+        }
+        char *p = getcwd(machine.rootdir, sizeof(machine.rootdir));
+        if (p == NULL) {
+            fprintf(stderr, "%s\n", strerror(errno));
+            return EXIT_FAILURE;
+        }
+    }
     argv++;
     argc--;
-    // cur dir
-    snprintf(machine.curdir, sizeof(machine.curdir), "./");
     // aout
     if (!serializeArgvReal(&machine, argc, argv)) {
         fprintf(stderr, "/ [ERR] Too big argv\n");

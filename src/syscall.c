@@ -23,65 +23,55 @@
 #endif
 #include "util.h"
 
-static void convstat16(uint8_t *pi, const struct stat* ps) {
-    struct inode {
-        char  minor;         /* +0: minor device of i-node */
-        char  major;         /* +1: major device */
-        int   inumber;       /* +2 */
-        int   flags;         /* +4: see below */
-        char  nlinks;        /* +6: number of links to file */
-        char  uid;           /* +7: user ID of owner */
-        char  gid;           /* +8: group ID of owner */
-        char  size0;         /* +9: high byte of 24-bit size */
-        int   size1;         /* +10: low word of 24-bit size */
-        int   addr[8];       /* +12: block numbers or device number */
-        int   actime[2];     /* +28: time of last access */
-        int   modtime[2];    /* +32: time of last modification */
-    };
-    /* flags
-    100000   i-node is allocated
-    060000   2-bit file type:
-        000000   plain file
-        040000   directory
-        020000   character-type special file
-        060000   block-type special file.
-    010000   large file
-    004000   set user-ID on execution
-    002000   set group-ID on execution
-    001000   save text image after execution
-    000400   read (owner)
-    000200   write (owner)
-    000100   execute (owner)
-    000070   read, write, execute (group)
-    000007   read, write, execute (others)
+#ifdef UU_M68K_MINIX
+static void convstat(uint8_t *pi, const struct stat* ps) {
+    /* st_mode:
+    #define S_IFMT  0170000 // type of file
+    #define S_IFREG 0100000 // regular
+    #define S_IFBLK 0060000 // block special
+    #define S_IFDIR 0040000 // directory
+    #define S_IFCHR 0020000 // character special
+    #define S_IFIFO 0010000 // this is a FIFO
+    #define S_ISUID 0004000 // set user id on execution
+    #define S_ISGID 0002000 // set group id on execution
+                            // next is reserved for future use
+    #define S_ISVTX   01000 // save swapped text even after use
     */
-    pi[0] = ps->st_dev & 0xff; // pseudo
-    pi[1] = (ps->st_dev >> 8) & 0xff; // pseudo
-    pi[2] = ps->st_ino & 0xff;
-    pi[3] = (ps->st_ino >> 8) & 0xff;
-    pi[4] = ps->st_mode & 0xff;
-    pi[5] = (ps->st_mode >> 8) & 0xff;
-    pi[6] = ps->st_nlink & 0xff;
-    pi[7] = ps->st_uid & 0xff;
-    pi[8] = ps->st_gid & 0xff;
-    pi[9] = (ps->st_size >> 16) & 0xff;
-    pi[10] = ps->st_size & 0xff;
-    pi[11] = (ps->st_size >> 8) & 0xff;
-    // addr
-    //pi[12];
-    // actime
+    pi[0] = (ps->st_dev >> 8) & 0xff; // pseudo
+    pi[1] = ps->st_dev & 0xff; // pseudo
+    pi[2] = (ps->st_ino >> 8) & 0xff;
+    pi[3] = ps->st_ino & 0xff;
+    pi[4] = (ps->st_mode >> 8) & 0xff;
+    pi[5] = ps->st_mode & 0xff;
+    pi[6] = (ps->st_nlink >>8) & 0xff;
+    pi[7] = ps->st_nlink & 0xff;
+    pi[8] = (ps->st_uid >> 8) & 0xff;
+    pi[9] = ps->st_uid & 0xff;
+    pi[10] = (ps->st_gid >> 8) & 0xff;
+    pi[11] = ps->st_gid & 0xff;
+    pi[12] = (ps->st_rdev >> 8) & 0xff;
+    pi[13] = ps->st_rdev & 0xff;
+    pi[14] = (ps->st_size >> 24) & 0xff;
+    pi[15] = (ps->st_size >> 16) & 0xff;
+    pi[16] = (ps->st_size >> 8) & 0xff;
+    pi[17] = ps->st_size & 0xff;
+
+    // atime
+    //pi[18];
+    //pi[19];
+    //pi[20];
+    //pi[21];
+    // mtime
+    //pi[22];
+    //pi[23];
+    //pi[24];
+    //pi[25];
+    // ctime
+    //pi[26];
+    //pi[27];
     //pi[28];
     //pi[29];
-    //pi[30];
-    //pi[31];
-    // modtime
-    //pi[32];
-    //pi[33];
-    //pi[34];
-    //pi[35];
 }
-
-#ifdef UU_M68K_MINIX
 
 #define M1                 1
 #define M3                 3
@@ -185,7 +175,38 @@ void setM1(message *m, uint32_t vraw, machine_t *pm) {
     return;
 }
 
+void setM3(message *m, uint32_t vraw, machine_t *pm) {
+    uint16_t vaddrH, vaddrL;
+    uint32_t vaddr;
+
+    m->m_source = ntohs(*(uint16_t *)mmuV2R(pm, vraw+0));
+    m->m_type = ntohs(*(uint16_t *)mmuV2R(pm, vraw+2));
+
+    m->m3_i1 = ntohs(*(uint16_t *)mmuV2R(pm, vraw+4));
+    m->m3_i2 = ntohs(*(uint16_t *)mmuV2R(pm, vraw+6));
+
+    vaddrH = ntohs(*(uint16_t *)mmuV2R(pm, vraw+8));
+    vaddrL = ntohs(*(uint16_t *)mmuV2R(pm, vraw+10));
+    vaddr = (vaddrH << 16) | vaddrL;
+    m->m3_p1 = mmuV2R(pm, vaddr);
+
+    const uint8_t *src = mmuV2R(pm, vraw+12);
+    memcpy(m->m3_ca1, src, M3_STRING);
+
+    return;
+}
+
 void mysyscall16(machine_t *pm) {
+    message m;
+
+    const char *name;
+    char path0[PATH_MAX];
+    int fd;
+    uint8_t *buf;
+    size_t nbytes;
+    ssize_t sret;
+    int ret;
+
     uint16_t sendrec = getD0(pm->cpu) & 0xffff;
     assert(sendrec == BOTH);
     setD0(pm->cpu, 0); // succeed sendrec itself
@@ -195,9 +216,6 @@ void mysyscall16(machine_t *pm) {
     assert((vraw & 1) == 0); // alignment
     uint16_t *ptypeBE = (uint16_t *)(mmuV2R(pm, vraw+2));
 
-    message m;
-    ssize_t sret;
-
     uint16_t syscallID = ntohs(*ptypeBE);
     switch (syscallID) {
     case 1:
@@ -205,28 +223,188 @@ void mysyscall16(machine_t *pm) {
         assert(mmfs == MM);
         setM1(&m, vraw, pm);
         int status = m.m1_i1;
-        //printf("/ _exit(%d)\n", status);
+        //fprintf(stderr, "/ _exit(%d)\n", status);
         _exit(status);
+        break;
+    case 3:
+        // read
+        assert(mmfs == FS);
+        setM1(&m, vraw, pm);
+        fd = m.m1_i1;
+        buf = m.m1_p1;
+        nbytes = m.m1_i2;
+        //fprintf(stderr, "/ read(%d, %08x, %ld)\n", fd, mmuR2V(pm, buf), nbytes);
+        if (pm->dirfd != -1 && pm->dirp != NULL && fd == pm->dirfd) {
+            // dir
+            struct dirent *ent;
+            ent = readdir(pm->dirp);
+            if (ent == NULL) {
+                if (errno == 0) {
+                    // EOF
+                    sret = 0;
+                } else {
+                    // error
+                    sret = -1;
+                }
+            } else {
+                assert(nbytes == 16);
+                uint8_t *p = buf;
+                // ino
+                p[0] = (ent->d_ino >> 8) & 0xff;
+                p[1] = ent->d_ino & 0xff;
+                // name
+                //fprintf(stderr, "/   %s\n", ent->d_name);
+                strncpy((char *)&p[2], ent->d_name, 16 - 2);
+                sret = nbytes;
+            }
+        } else {
+            // file
+            sret = read(fd, buf, nbytes);
+        }
+        if (sret < 0) {
+            *ptypeBE = htons(-errno & 0xffff);
+        } else {
+            *ptypeBE = htons(sret & 0xffff);
+        }
         break;
     case 4:
         // write
         assert(mmfs == FS);
         setM1(&m, vraw, pm);
-        int fd = m.m1_i1;
-        uint8_t *buf = m.m1_p1;
-        size_t nbytes = m.m1_i2;
+        fd = m.m1_i1;
+        buf = m.m1_p1;
+        nbytes = m.m1_i2;
+        //fprintf(stderr, "/ write(%d, %08x, %d)\n", fd, mmuR2V(pm, buf), nbytes);
         sret = write(fd, buf, nbytes);
         if (sret < 0) {
             *ptypeBE = htons(-errno & 0xffff);
         } else {
             *ptypeBE = htons(sret & 0xffff);
         }
+        break;
+    case 5:
+        // open
+        assert(mmfs == FS);
+        setM1(&m, vraw, pm);
+        //size_t len = m.m1_i1;
+        int flags = m.m1_i2;
+        int mode = m.m1_i3;
+        name = (const char *)m.m1_p1;
+        if (!(flags & O_CREAT)) {
+            setM3(&m, vraw, pm);
+            mode = 0;
+            name = (const char *)m.m3_p1;
+        }
+        //fprintf(stderr, "/ open(\"%s\", %d, %d) // name len=%d\n", name, flags, mode, m.m1_i1);
+        addroot(path0, sizeof(path0), name, pm->rootdir);
+        ret = open(path0, flags, mode);
+        if (ret < 0) {
+            *ptypeBE = htons(-errno & 0xffff);
+        } else {
+            *ptypeBE = htons(ret & 0xffff);
+
+            // check file or dir
+            fd = ret;
+            struct stat s;
+            ret = fstat(fd, &s);
+            if (ret == 0 && S_ISDIR(s.st_mode)) {
+                // dir
+                DIR *dirp = fdopendir(fd);
+                if (dirp == NULL) {
+                    *ptypeBE = htons(-errno & 0xffff);
+                    close(fd);
+                } else {
+                    // TODO: support only one dir per process, currently
+                    assert(pm->dirfd == -1);
+                    assert(pm->dirp == NULL);
+                    pm->dirfd = fd;
+                    pm->dirp = dirp;
+                }
+            }
+        }
+        break;
+    case 6:
+        // close
+        assert(mmfs == FS);
+        setM1(&m, vraw, pm);
+        fd = m.m1_i1;
+        //fprintf(stderr, "/ close(%d)\n", fd);
+        if (pm->dirfd != -1 && pm->dirp != NULL && fd == pm->dirfd) {
+            // dir
+            ret = closedir(pm->dirp);
+            pm->dirfd = -1;
+            pm->dirp = NULL;
+        } else {
+            // file
+            ret = close(fd);
+        }
+        if (ret < 0) {
+            *ptypeBE = htons(-errno & 0xffff);
+        } else {
+            *ptypeBE = htons(ret & 0xffff);
+        }
+        break;
+    case 12:
+        // chdir
+        assert(mmfs == FS);
+        setM3(&m, vraw, pm);
+        //size_t len = m.m3_i1;
+        //uint16_t zero = m.m3_i2;
+        name = (const char *)m.m3_p1; // long and short
+        //name = (const char *)&m.m3_ca1[0]; // short only
+        //fprintf(stderr, "/ chdir(\"%s\") // name len=%d\n", name, m.m3_i1);
+        if (name[0] == '.' && name[1] == '.' && name[2] == '\0') {
+            // TODO: support
+            //  '../foo'
+            //  './..'
+            //  'foo/bar/../../..'
+            char *p = getcwd(path0, sizeof(path0));
+            if (p != NULL && strcmp(path0, pm->rootdir) == 0) {
+                // do nothing
+                *ptypeBE = 0;
+                break;
+            }
+            ret = chdir("..");
+        } else {
+            addroot(path0, sizeof(path0), name, pm->rootdir);
+            ret = chdir(path0);
+        }
+        if (ret < 0) {
+            *ptypeBE = htons(-errno & 0xffff);
+        } else {
+            *ptypeBE = htons(ret & 0xffff);
+        }
+        break;
+    case 18:
+        // stat
+        assert(mmfs == FS);
+        setM1(&m, vraw, pm);
+        //size_t len = m.m1_i1;
+        name = (const char *)m.m1_p1;
+        buf = m.m1_p2;
+        //fprintf(stderr, "/ stat(\"%s\", %08x) // name len=%d\n", name, mmuR2V(pm, buf), m.m1_i1);
+        {
+            addroot(path0, sizeof(path0), name, pm->rootdir);
+
+            struct stat s;
+            ret = stat(path0, &s);
+            if (ret < 0) {
+                *ptypeBE = htons(-errno & 0xffff);
+            } else {
+                *ptypeBE = htons(ret & 0xffff);
+                uint8_t *pi = buf;
+                convstat(pi, &s);
+                // debug
+                //fprintf(stderr, "/ [DBG] stat src: %06o\n", s.st_mode);
+                //fprintf(stderr, "/ [DBG] stat dst: %06o\n", ntohs(*(uint16_t *)(pi + 4)));
+            }
+        }
 #if 0
         uint16_t vaddrH = ntohs(*(uint16_t *)mmuV2R(pm, vraw+10));
         uint16_t vaddrL = ntohs(*(uint16_t *)mmuV2R(pm, vraw+12));
         printf("=================== %d, %d, %04x_%04x, %ld\n", mmfs, fd, vaddrH, vaddrL, nbytes);
         printf("=================== %02x,%02x\n", pm->virtualMemory[vaddrL+0], pm->virtualMemory[vaddrL+1]);
-        printf("============ %04lx,%04x\n", sret, mmuR2V(pm, ptypeBE));
+        printf("============ %04lx,%04x\n", sret, mmuR2V(pm, (uint8_t *)ptypeBE));
         printf("----- %04lx\n", m.m1_p1 - mmuV2R(pm, 0));
         {
             int start = vraw & 0xfff0;
@@ -241,13 +419,15 @@ void mysyscall16(machine_t *pm) {
 #endif
         break;
     default:
+        // TODO: not implemented
+        fprintf(stderr, "/ [ERR] Not implemented: sys %d, %08x\n", syscallID, vraw);
         assert(0);
         break;
     }
 }
 void syscallString16(machine_t *pm, char *str, size_t size, uint8_t id) {
     /*
-    printf("/ syscall: src=%d, type=%d\n", m_source, m_type);
+    fprintf(stderr, "/ syscall: src=%d, type=%d\n", m_source, m_type);
     */
 }
 #else
@@ -281,9 +461,65 @@ static int serializeArgvVirt(machine_t *pm, uint8_t *argv) {
     return 0;
 }
 
+static void convstat16(uint8_t *pi, const struct stat* ps) {
+    struct inode {
+        char  minor;         /* +0: minor device of i-node */
+        char  major;         /* +1: major device */
+        int   inumber;       /* +2 */
+        int   flags;         /* +4: see below */
+        char  nlinks;        /* +6: number of links to file */
+        char  uid;           /* +7: user ID of owner */
+        char  gid;           /* +8: group ID of owner */
+        char  size0;         /* +9: high byte of 24-bit size */
+        int   size1;         /* +10: low word of 24-bit size */
+        int   addr[8];       /* +12: block numbers or device number */
+        int   actime[2];     /* +28: time of last access */
+        int   modtime[2];    /* +32: time of last modification */
+    };
+    /* flags
+    100000   i-node is allocated
+    060000   2-bit file type:
+        000000   plain file
+        040000   directory
+        020000   character-type special file
+        060000   block-type special file.
+    010000   large file
+    004000   set user-ID on execution
+    002000   set group-ID on execution
+    001000   save text image after execution
+    000400   read (owner)
+    000200   write (owner)
+    000100   execute (owner)
+    000070   read, write, execute (group)
+    000007   read, write, execute (others)
+    */
+    pi[0] = ps->st_dev & 0xff; // pseudo
+    pi[1] = (ps->st_dev >> 8) & 0xff; // pseudo
+    pi[2] = ps->st_ino & 0xff;
+    pi[3] = (ps->st_ino >> 8) & 0xff;
+    pi[4] = ps->st_mode & 0xff;
+    pi[5] = (ps->st_mode >> 8) & 0xff;
+    pi[6] = ps->st_nlink & 0xff;
+    pi[7] = ps->st_uid & 0xff;
+    pi[8] = ps->st_gid & 0xff;
+    pi[9] = (ps->st_size >> 16) & 0xff;
+    pi[10] = ps->st_size & 0xff;
+    pi[11] = (ps->st_size >> 8) & 0xff;
+    // addr
+    //pi[12];
+    // actime
+    //pi[28];
+    //pi[29];
+    //pi[30];
+    //pi[31];
+    // modtime
+    //pi[32];
+    //pi[33];
+    //pi[34];
+    //pi[35];
+}
+
 void mysyscall16(machine_t *pm) {
-
-
     uint16_t addr;
 
     uint16_t word0 = 0;
@@ -365,13 +601,7 @@ void mysyscall16(machine_t *pm) {
                 p[0] = ent->d_ino & 0xff;
                 p[1] = (ent->d_ino >> 8) & 0xff;
                 // name
-                // TODO: Which is better?
-#if 1
                 strncpy((char *)&p[2], ent->d_name, 16 - 2);
-#else
-                strncpy((char *)&p[2], ent->d_name, 16 - 2 - 1);
-                p[15] = '\0';
-#endif
                 sret = word1;
             }
         } else {
