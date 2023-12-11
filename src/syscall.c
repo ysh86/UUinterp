@@ -23,6 +23,9 @@
 #endif
 #include "util.h"
 
+// for debug
+#define MY_STRACE 0
+
 #ifdef UU_M68K_MINIX
 static void convstat(uint8_t *pi, const struct stat* ps) {
     /* st_mode:
@@ -145,6 +148,13 @@ typedef struct {
 #define RECEIVE            2    /* function code for receiving messages */
 #define BOTH               3    /* function code for SEND + RECEIVE */
 
+// ioctl
+#define TIOCGETP  (('t'<<8) |  8)
+#define TIOCSETP  (('t'<<8) |  9)
+#define TIOCGETC  (('t'<<8) | 18)
+#define TIOCSETC  (('t'<<8) | 17)
+#define TIOCFLUSH (('t'<<8) | 16)
+
 
 void setM1(message *m, uint32_t vraw, machine_t *pm) {
     uint16_t vaddrH, vaddrL;
@@ -171,6 +181,34 @@ void setM1(message *m, uint32_t vraw, machine_t *pm) {
     vaddrL = ntohs(*(uint16_t *)mmuV2R(pm, vraw+20));
     vaddr = (vaddrH << 16) | vaddrL;
     m->m1_p3 = mmuV2R(pm, vaddr);
+
+    return;
+}
+
+void setM2(message *m, uint32_t vraw, machine_t *pm) {
+    uint16_t hi, lo;
+    uint16_t vaddrH, vaddrL;
+    uint32_t vaddr;
+
+    m->m_source = ntohs(*(uint16_t *)mmuV2R(pm, vraw+0));
+    m->m_type = ntohs(*(uint16_t *)mmuV2R(pm, vraw+2));
+
+    m->m2_i1 = ntohs(*(uint16_t *)mmuV2R(pm, vraw+4));
+    m->m2_i2 = ntohs(*(uint16_t *)mmuV2R(pm, vraw+6));
+    m->m2_i3 = ntohs(*(uint16_t *)mmuV2R(pm, vraw+8));
+
+    hi = ntohs(*(uint16_t *)mmuV2R(pm, vraw+10));
+    lo = ntohs(*(uint16_t *)mmuV2R(pm, vraw+12));
+    m->m2_l1 = (hi << 16) | lo;
+
+    hi = ntohs(*(uint16_t *)mmuV2R(pm, vraw+14));
+    lo = ntohs(*(uint16_t *)mmuV2R(pm, vraw+16));
+    m->m2_l2 = (hi << 16) | lo;
+
+    vaddrH = ntohs(*(uint16_t *)mmuV2R(pm, vraw+18));
+    vaddrL = ntohs(*(uint16_t *)mmuV2R(pm, vraw+20));
+    vaddr = (vaddrH << 16) | vaddrL;
+    m->m2_p1 = mmuV2R(pm, vaddr);
 
     return;
 }
@@ -204,6 +242,7 @@ void mysyscall16(machine_t *pm) {
     int fd;
     uint8_t *buf;
     size_t nbytes;
+    int flags;
     ssize_t sret;
     int ret;
 
@@ -214,16 +253,27 @@ void mysyscall16(machine_t *pm) {
     uint16_t mmfs = getD1(pm->cpu) & 0xffff;
     uint32_t vraw = getA0(pm->cpu);
     assert((vraw & 1) == 0); // alignment
-    uint16_t *ptypeBE = (uint16_t *)(mmuV2R(pm, vraw+2));
 
-    uint16_t syscallID = ntohs(*ptypeBE);
+    // reply
+    uint16_t *pBE_reply_type = (uint16_t *)(mmuV2R(pm, vraw+2));
+    // FS
+    uint16_t *pBE_reply_l1_hi = (uint16_t *)(mmuV2R(pm, vraw+10));
+    uint16_t *pBE_reply_l1_lo = (uint16_t *)(mmuV2R(pm, vraw+12));
+    // MM
+    uint16_t *pBE_reply_i1 = (uint16_t *)(mmuV2R(pm, vraw+4));
+    uint16_t *pBE_reply_p1_hi = (uint16_t *)(mmuV2R(pm, vraw+18));
+    uint16_t *pBE_reply_p1_lo = (uint16_t *)(mmuV2R(pm, vraw+20));
+
+    uint16_t syscallID = ntohs(*pBE_reply_type);
     switch (syscallID) {
     case 1:
         // exit
         assert(mmfs == MM);
         setM1(&m, vraw, pm);
         int status = m.m1_i1;
-        //fprintf(stderr, "/ _exit(%d)\n", status);
+#if MY_STRACE
+        fprintf(stderr, "/ _exit(%d)\n", status);
+#endif
         _exit(status);
         break;
     case 3:
@@ -233,38 +283,46 @@ void mysyscall16(machine_t *pm) {
         fd = m.m1_i1;
         buf = m.m1_p1;
         nbytes = m.m1_i2;
-        //fprintf(stderr, "/ read(%d, %08x, %ld)\n", fd, mmuR2V(pm, buf), nbytes);
+#if MY_STRACE
+        fprintf(stderr, "/ read(%d, %08x, %ld)\n", fd, mmuR2V(pm, buf), nbytes);
+#endif
         if (pm->dirfd != -1 && pm->dirp != NULL && fd == pm->dirfd) {
             // dir
-            struct dirent *ent;
-            ent = readdir(pm->dirp);
-            if (ent == NULL) {
-                if (errno == 0) {
-                    // EOF
-                    sret = 0;
-                } else {
-                    // error
-                    sret = -1;
+            assert((nbytes & 0xf) == 0);
+            sret = 0;
+            errno = 0;
+            for (size_t i = 0; i < nbytes; i += 16) {
+                struct dirent *ent;
+                ent = readdir(pm->dirp);
+                if (ent == NULL) {
+                    if (errno == 0) {
+                        // EOF
+                    } else {
+                        // error
+                        sret = -1;
+                    }
+                    break;
                 }
-            } else {
-                assert(nbytes == 16);
-                uint8_t *p = buf;
+
+                uint8_t *p = buf + i;
                 // ino
                 p[0] = (ent->d_ino >> 8) & 0xff;
                 p[1] = ent->d_ino & 0xff;
                 // name
-                //fprintf(stderr, "/   %s\n", ent->d_name);
-                strncpy((char *)&p[2], ent->d_name, 16 - 2);
-                sret = nbytes;
+                memcpy((char *)&p[2], ent->d_name, 16 - 2);
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] %s\n", ent->d_name);
+#endif
+                sret += 16;
             }
         } else {
             // file
             sret = read(fd, buf, nbytes);
         }
         if (sret < 0) {
-            *ptypeBE = htons(-errno & 0xffff);
+            *pBE_reply_type = htons(-errno & 0xffff);
         } else {
-            *ptypeBE = htons(sret & 0xffff);
+            *pBE_reply_type = htons(sret & 0xffff);
         }
         break;
     case 4:
@@ -274,12 +332,14 @@ void mysyscall16(machine_t *pm) {
         fd = m.m1_i1;
         buf = m.m1_p1;
         nbytes = m.m1_i2;
-        //fprintf(stderr, "/ write(%d, %08x, %d)\n", fd, mmuR2V(pm, buf), nbytes);
+#if MY_STRACE
+        //fprintf(stderr, "/ write(%d, %08x, %ld)\n", fd, mmuR2V(pm, buf), nbytes);
+#endif
         sret = write(fd, buf, nbytes);
         if (sret < 0) {
-            *ptypeBE = htons(-errno & 0xffff);
+            *pBE_reply_type = htons(-errno & 0xffff);
         } else {
-            *ptypeBE = htons(sret & 0xffff);
+            *pBE_reply_type = htons(sret & 0xffff);
         }
         break;
     case 5:
@@ -287,7 +347,7 @@ void mysyscall16(machine_t *pm) {
         assert(mmfs == FS);
         setM1(&m, vraw, pm);
         //size_t len = m.m1_i1;
-        int flags = m.m1_i2;
+        flags = m.m1_i2;
         int mode = m.m1_i3;
         name = (const char *)m.m1_p1;
         if (!(flags & O_CREAT)) {
@@ -295,13 +355,15 @@ void mysyscall16(machine_t *pm) {
             mode = 0;
             name = (const char *)m.m3_p1;
         }
-        //fprintf(stderr, "/ open(\"%s\", %d, %d) // name len=%d\n", name, flags, mode, m.m1_i1);
+#if MY_STRACE
+        fprintf(stderr, "/ open(\"%s\", %d, %d) // name len=%d\n", name, flags, mode, m.m1_i1);
+#endif
         addroot(path0, sizeof(path0), name, pm->rootdir);
         ret = open(path0, flags, mode);
         if (ret < 0) {
-            *ptypeBE = htons(-errno & 0xffff);
+            *pBE_reply_type = htons(-errno & 0xffff);
         } else {
-            *ptypeBE = htons(ret & 0xffff);
+            *pBE_reply_type = htons(ret & 0xffff);
 
             // check file or dir
             fd = ret;
@@ -311,7 +373,7 @@ void mysyscall16(machine_t *pm) {
                 // dir
                 DIR *dirp = fdopendir(fd);
                 if (dirp == NULL) {
-                    *ptypeBE = htons(-errno & 0xffff);
+                    *pBE_reply_type = htons(-errno & 0xffff);
                     close(fd);
                 } else {
                     // TODO: support only one dir per process, currently
@@ -328,7 +390,9 @@ void mysyscall16(machine_t *pm) {
         assert(mmfs == FS);
         setM1(&m, vraw, pm);
         fd = m.m1_i1;
-        //fprintf(stderr, "/ close(%d)\n", fd);
+#if MY_STRACE
+        fprintf(stderr, "/ close(%d)\n", fd);
+#endif
         if (pm->dirfd != -1 && pm->dirp != NULL && fd == pm->dirfd) {
             // dir
             ret = closedir(pm->dirp);
@@ -339,9 +403,9 @@ void mysyscall16(machine_t *pm) {
             ret = close(fd);
         }
         if (ret < 0) {
-            *ptypeBE = htons(-errno & 0xffff);
+            *pBE_reply_type = htons(-errno & 0xffff);
         } else {
-            *ptypeBE = htons(ret & 0xffff);
+            *pBE_reply_type = htons(ret & 0xffff);
         }
         break;
     case 12:
@@ -352,7 +416,9 @@ void mysyscall16(machine_t *pm) {
         //uint16_t zero = m.m3_i2;
         name = (const char *)m.m3_p1; // long and short
         //name = (const char *)&m.m3_ca1[0]; // short only
-        //fprintf(stderr, "/ chdir(\"%s\") // name len=%d\n", name, m.m3_i1);
+#if MY_STRACE
+        fprintf(stderr, "/ chdir(\"%s\") // name len=%d\n", name, m.m3_i1);
+#endif
         if (name[0] == '.' && name[1] == '.' && name[2] == '\0') {
             // TODO: support
             //  '../foo'
@@ -361,7 +427,7 @@ void mysyscall16(machine_t *pm) {
             char *p = getcwd(path0, sizeof(path0));
             if (p != NULL && strcmp(path0, pm->rootdir) == 0) {
                 // do nothing
-                *ptypeBE = 0;
+                *pBE_reply_type = 0;
                 break;
             }
             ret = chdir("..");
@@ -370,9 +436,33 @@ void mysyscall16(machine_t *pm) {
             ret = chdir(path0);
         }
         if (ret < 0) {
-            *ptypeBE = htons(-errno & 0xffff);
+            *pBE_reply_type = htons(-errno & 0xffff);
         } else {
-            *ptypeBE = htons(ret & 0xffff);
+            *pBE_reply_type = htons(ret & 0xffff);
+        }
+        break;
+    case 17:
+        // brk
+        assert(mmfs == MM);
+        setM1(&m, vraw, pm);
+        uint32_t addr = mmuR2V(pm, m.m1_p1);
+        uint32_t addr256 = (addr + 255) & ~255;
+#if MY_STRACE
+        fprintf(stderr, "/ brk(%08x) // aligned=%08x\n", addr, addr256);
+        fprintf(stderr, "/   bssEnd: %08x\n", pm->bssEnd);
+        fprintf(stderr, "/   brk:    %08x\n", pm->brk);
+        fprintf(stderr, "/   SP:     %08x\n", getSP(pm->cpu));
+#endif
+        if (addr256 < pm->bssEnd || getSP(pm->cpu) < addr256) {
+            *pBE_reply_type = htons(-ENOMEM & 0xffff);
+            // -1
+            *pBE_reply_p1_hi = 0xffff;
+            *pBE_reply_p1_lo = 0xffff;
+        } else {
+            pm->brk = addr256;
+            *pBE_reply_type = 0;
+            *pBE_reply_p1_hi = htons(addr>>16);
+            *pBE_reply_p1_lo = htons(addr&0xffff);
         }
         break;
     case 18:
@@ -382,41 +472,112 @@ void mysyscall16(machine_t *pm) {
         //size_t len = m.m1_i1;
         name = (const char *)m.m1_p1;
         buf = m.m1_p2;
-        //fprintf(stderr, "/ stat(\"%s\", %08x) // name len=%d\n", name, mmuR2V(pm, buf), m.m1_i1);
+#if MY_STRACE
+        fprintf(stderr, "/ stat(\"%s\", %08x) // name len=%d\n", name, mmuR2V(pm, buf), m.m1_i1);
+#endif
         {
             addroot(path0, sizeof(path0), name, pm->rootdir);
 
             struct stat s;
             ret = stat(path0, &s);
             if (ret < 0) {
-                *ptypeBE = htons(-errno & 0xffff);
+                *pBE_reply_type = htons(-errno & 0xffff);
             } else {
-                *ptypeBE = htons(ret & 0xffff);
+                *pBE_reply_type = htons(ret & 0xffff);
                 uint8_t *pi = buf;
                 convstat(pi, &s);
-                // debug
-                //fprintf(stderr, "/ [DBG] stat src: %06o\n", s.st_mode);
-                //fprintf(stderr, "/ [DBG] stat dst: %06o\n", ntohs(*(uint16_t *)(pi + 4)));
-            }
-        }
-#if 0
-        uint16_t vaddrH = ntohs(*(uint16_t *)mmuV2R(pm, vraw+10));
-        uint16_t vaddrL = ntohs(*(uint16_t *)mmuV2R(pm, vraw+12));
-        printf("=================== %d, %d, %04x_%04x, %ld\n", mmfs, fd, vaddrH, vaddrL, nbytes);
-        printf("=================== %02x,%02x\n", pm->virtualMemory[vaddrL+0], pm->virtualMemory[vaddrL+1]);
-        printf("============ %04lx,%04x\n", sret, mmuR2V(pm, (uint8_t *)ptypeBE));
-        printf("----- %04lx\n", m.m1_p1 - mmuV2R(pm, 0));
-        {
-            int start = vraw & 0xfff0;
-            for (int j = start; j < start+256; j += 16) {
-                printf("/ %04x:", j);
-                for (int i = 0; i < 16; i++) {
-                    printf(" %02x", *mmuV2R(pm, j + i));
-                }
-                printf("\n");
-            }
-        }
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] stat src: %06o\n", s.st_mode);
+                fprintf(stderr, "/ [DBG] stat dst: %06o\n", ntohs(*(uint16_t *)(pi + 4)));
 #endif
+            }
+        }
+        break;
+    case 19:
+        // lseek
+        assert(mmfs == FS);
+        setM2(&m, vraw, pm);
+        fd = m.m2_i1;
+        off_t offset = m.m2_l1;
+        int whence = m.m2_i2;
+#if MY_STRACE
+        fprintf(stderr, "/ lseek(%d, %ld, %d)\n", fd, offset, whence);
+#endif
+        // seekdir
+        if (pm->dirp != NULL) {
+            assert(offset == 0);
+            assert(whence == SEEK_CUR);
+        }
+        offset = lseek(fd, offset, whence);
+        if (offset < 0) {
+            *pBE_reply_type = htons(-errno & 0xffff);
+        } else {
+            *pBE_reply_type = 0;
+            *pBE_reply_l1_hi = htons((offset>>16) & 0xffff);
+            *pBE_reply_l1_lo = htons(offset & 0xffff);
+        }
+        break;
+    case 24:
+        // getuid
+        assert(mmfs == MM);
+#if MY_STRACE
+        fprintf(stderr, "/ getuid(),geteuid()\n");
+#endif
+        uid_t uid = getuid();
+        uid_t euid = geteuid();
+        *pBE_reply_type = htons(uid & 0xffff);
+        *pBE_reply_i1 = htons(euid & 0xffff);
+        break;
+    case 28:
+        // fstat
+        assert(mmfs == FS);
+        setM1(&m, vraw, pm);
+        fd = m.m1_i1;
+        buf = m.m1_p1;
+#if MY_STRACE
+        fprintf(stderr, "/ fstat(%d, %08x)\n", fd, mmuR2V(pm, buf));
+#endif
+        {
+            struct stat s;
+            ret = fstat(fd, &s);
+            if (ret < 0) {
+                *pBE_reply_type = htons(-errno & 0xffff);
+            } else {
+                *pBE_reply_type = htons(ret & 0xffff);
+                uint8_t *pi = buf;
+                convstat(pi, &s);
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] fstat src: %06o\n", s.st_mode);
+                fprintf(stderr, "/ [DBG] fstat dst: %06o\n", ntohs(*(uint16_t *)(pi + 4)));
+#endif
+            }
+        }
+        break;
+    case 54:
+        // ioctl
+        assert(mmfs == FS);
+        setM2(&m, vraw, pm);
+        fd = m.m2_i1;
+        unsigned long request = m.m2_i3;
+        //uint32_t spek = m.m2_l1;
+        flags = m.m2_l2;
+        // support only isatty()
+        if (request != TIOCGETP) {
+            *pBE_reply_type = htons(-EBADF & 0xffff);
+            break;
+        }
+#if MY_STRACE
+        fprintf(stderr, "/ isatty(%d)\n", fd);
+#endif
+        ret = isatty(fd);
+#if MY_STRACE
+        fprintf(stderr, "/ [DBG] ret=%d\n", ret);
+#endif
+        if (ret == 0) {
+            *pBE_reply_type = htons(-errno & 0xffff);
+        } else {
+            *pBE_reply_type = htons(ret & 0xffff);
+        }
         break;
     default:
         // TODO: not implemented
