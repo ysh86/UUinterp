@@ -58,22 +58,21 @@ static void convstat(uint8_t *pi, const struct stat* ps) {
     pi[15] = (ps->st_size >> 16) & 0xff;
     pi[16] = (ps->st_size >> 8) & 0xff;
     pi[17] = ps->st_size & 0xff;
-
     // atime
-    //pi[18];
-    //pi[19];
-    //pi[20];
-    //pi[21];
+    pi[18] = (ps->st_atime >> 24) & 0xff;
+    pi[19] = (ps->st_atime >> 16) & 0xff;
+    pi[20] = (ps->st_atime >> 8) & 0xff;
+    pi[21] = ps->st_atime & 0xff;
     // mtime
-    //pi[22];
-    //pi[23];
-    //pi[24];
-    //pi[25];
+    pi[22] = (ps->st_mtime >> 24) & 0xff;
+    pi[23] = (ps->st_mtime >> 16) & 0xff;
+    pi[24] = (ps->st_mtime >> 8) & 0xff;
+    pi[25] = ps->st_mtime & 0xff;
     // ctime
-    //pi[26];
-    //pi[27];
-    //pi[28];
-    //pi[29];
+    pi[26] = (ps->st_ctime >> 24) & 0xff;
+    pi[27] = (ps->st_ctime >> 16) & 0xff;
+    pi[28] = (ps->st_ctime >> 8) & 0xff;
+    pi[29] = ps->st_ctime & 0xff;
 }
 
 #define M1                 1
@@ -441,6 +440,27 @@ void mysyscall16(machine_t *pm) {
             *pBE_reply_type = htons(ret & 0xffff);
         }
         break;
+    case 13:
+        // time
+        assert(mmfs == FS);
+        setM1(&m, vraw, pm);
+#if MY_STRACE
+        fprintf(stderr, "/ time()\n");
+#endif
+        {
+            time_t t = time(NULL);
+            if (t < 0) {
+                *pBE_reply_type = htons(-errno & 0xffff);
+                // -1
+                *pBE_reply_l1_hi = 0xffff;
+                *pBE_reply_l1_lo = 0xffff;
+            } else {
+                *pBE_reply_type = 0;
+                *pBE_reply_l1_hi = htons((t>>16) & 0xffff);
+                *pBE_reply_l1_lo = htons(t & 0xffff);
+            }
+        }
+        break;
     case 17:
         // brk
         assert(mmfs == MM);
@@ -516,6 +536,15 @@ void mysyscall16(machine_t *pm) {
             *pBE_reply_l1_hi = htons((offset>>16) & 0xffff);
             *pBE_reply_l1_lo = htons(offset & 0xffff);
         }
+        break;
+    case 20:
+        // getpid
+        assert(mmfs == MM);
+#if MY_STRACE
+        fprintf(stderr, "/ getpid()\n");
+#endif
+        pid_t pid = getpid();
+        *pBE_reply_type = htons(pid & 0xffff);
         break;
     case 24:
         // getuid
