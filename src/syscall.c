@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/times.h>
+#include <signal.h>
 
 #include "syscall.h"
 #include "machine.h"
@@ -85,7 +86,7 @@ typedef struct {uint16_t m2i1, m2i2, m2i3; uint32_t m2l1, m2l2; uint8_t *m2p1;} 
 typedef struct {uint16_t m3i1, m3i2; uint8_t *m3p1; char m3ca1[M3_STRING];} mess_3;
 typedef struct {uint32_t m4l1, m4l2, m4l3, m4l4;} mess_4;
 typedef struct {uint8_t m5c1, m5c2; int m5i1, m5i2; uint32_t m5l1, m5l2, m5l3;} mess_5;
-typedef struct {uint16_t m6i1, m6i2, m6i3; uint32_t m6l1; void (*m6f1)();} mess_6;
+typedef struct {uint16_t m6i1, m6i2, m6i3; uint32_t m6l1; uintptr_t m6f1;} mess_6;
 
 typedef struct {
   uint16_t m_source;                 /* who sent the message */
@@ -118,7 +119,6 @@ typedef struct {
 #define m3_i2  m_u.m_m3.m3i2
 #define m3_p1  m_u.m_m3.m3p1
 #define m3_ca1 m_u.m_m3.m3ca1
-
 
 #define m4_l1  m_u.m_m4.m4l1
 #define m4_l2  m_u.m_m4.m4l2
@@ -229,6 +229,30 @@ void setM3(message *m, uint32_t vraw, machine_t *pm) {
 
     const uint8_t *src = mmuV2R(pm, vraw+12);
     memcpy(m->m3_ca1, src, M3_STRING);
+
+    return;
+}
+
+void setM6(message *m, uint32_t vraw, machine_t *pm) {
+    uint16_t hi, lo;
+    uint16_t vaddrH, vaddrL;
+    uint32_t vaddr;
+
+    m->m_source = ntohs(*(uint16_t *)mmuV2R(pm, vraw+0));
+    m->m_type = ntohs(*(uint16_t *)mmuV2R(pm, vraw+2));
+
+    m->m6_i1 = ntohs(*(uint16_t *)mmuV2R(pm, vraw+4));
+    m->m6_i2 = ntohs(*(uint16_t *)mmuV2R(pm, vraw+6));
+    m->m6_i3 = ntohs(*(uint16_t *)mmuV2R(pm, vraw+8));
+
+    hi = ntohs(*(uint16_t *)mmuV2R(pm, vraw+10));
+    lo = ntohs(*(uint16_t *)mmuV2R(pm, vraw+12));
+    m->m6_l1 = (hi << 16) | lo;
+
+    vaddrH = ntohs(*(uint16_t *)mmuV2R(pm, vraw+14));
+    vaddrL = ntohs(*(uint16_t *)mmuV2R(pm, vraw+16));
+    vaddr = (vaddrH << 16) | vaddrL;
+    m->m6_f1 = vaddr;
 
     return;
 }
@@ -580,6 +604,27 @@ void mysyscall16(machine_t *pm) {
                 fprintf(stderr, "/ [DBG] fstat dst: %06o\n", ntohs(*(uint16_t *)(pi + 4)));
 #endif
             }
+        }
+        break;
+    case 48:
+        // signal
+        assert(mmfs == MM);
+        setM6(&m, vraw, pm);
+        int sig = m.m6_i1;
+        uintptr_t func = m.m6_f1;
+        if (func == (uintptr_t)SIG_DFL/* 0 */ || func == (uintptr_t)SIG_IGN/* 1 */) {
+            fprintf(stderr, "/ signal(%d, %08lx)\n", sig, func);
+            func = (uintptr_t)signal(sig, (__sighandler_t)func);
+            fprintf(stderr, "/ [DBG] ret=%08lx\n", func);
+            if (func == (uintptr_t)SIG_ERR) {
+                *pBE_reply_type = htons(-errno & 0xffff);
+            } else {
+                *pBE_reply_type = htons(func & 0xffff);
+            }
+        } else {
+            fprintf(stderr, "/ [WRN] ignore signal(%d, %08lx)\n", sig, func);
+            errno = EINVAL;
+            *pBE_reply_type = htons(-errno & 0xffff);
         }
         break;
     case 54:
