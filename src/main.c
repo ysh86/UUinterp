@@ -69,8 +69,8 @@ int main(int argc, char *argv[]) {
     //////////////////////////
     // memory
     //////////////////////////
-    reloaded:
     uint32_t sp;
+    reloaded:
     if (!IS_MAGIC_BE(machine.aout.headerBE[0])) {
         // PDP-11 V6
         machine.textStart = SIZE_OF_VECTORS;

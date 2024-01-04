@@ -7,7 +7,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <dirent.h>
-#include <sys/errno.h>
+#include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>

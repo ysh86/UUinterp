@@ -13,7 +13,7 @@ INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 # pkgconfig
 # none
 
-CPPFLAGS ?= $(INC_FLAGS) -MMD -MP -D_POSIX_C_SOURCE=200809L
+CPPFLAGS := $(INC_FLAGS) -MMD -MP -D_POSIX_C_SOURCE=200809L
 CPPFLAGS += $(PKG_CONFIG_CFLAGS)
 LDFLAGS += $(PKG_CONFIG_LIBS)
 
@@ -37,6 +37,7 @@ m68k: $(BUILD_DIR)/$(TARGET_EXEC)
 
 
 $(BUILD_DIR)/$(TARGET_EXEC): $(OBJS)
+	$(MKDIR_P) $(BUILD_DIR)
 	$(CC) $(OBJS) -o $@ $(LDFLAGS)
 
 # assembly
@@ -57,8 +58,9 @@ $(BUILD_DIR)/%.cpp.o: %.cpp
 
 .PHONY: clean
 clean:
-	$(RM) -r $(BUILD_DIR)
+	$(RM) -r $(OBJS) $(DEPS) $(BUILD_DIR)
 
 -include $(DEPS)
 
+RM ?= rm -f
 MKDIR_P ?= mkdir -p
