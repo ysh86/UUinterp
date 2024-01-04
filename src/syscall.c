@@ -299,6 +299,23 @@ void mysyscall16(machine_t *pm) {
 #endif
         _exit(status);
         break;
+    case 2:
+        // fork
+        assert(mmfs == MM);
+        setM1(&m, vraw, pm);
+#if MY_STRACE
+        fprintf(stderr, "/ fork()\n");
+#endif
+        ret = fork();
+        if (ret < 0) {
+            *pBE_reply_type = htons(-errno & 0xffff);
+        } else {
+            *pBE_reply_type = htons(ret & 0xffff);
+#if MY_STRACE
+            fprintf(stderr, "/ [DBG] pid: %d (pc: %08x)\n", ret, getPC(pm->cpu));
+#endif
+        }
+        break;
     case 3:
         // read
         assert(mmfs == FS);
@@ -356,7 +373,7 @@ void mysyscall16(machine_t *pm) {
         buf = m.m1_p1;
         nbytes = m.m1_i2;
 #if MY_STRACE
-        //fprintf(stderr, "/ write(%d, %08x, %ld)\n", fd, mmuR2V(pm, buf), nbytes);
+        fprintf(stderr, "/ write(%d, %08x, %ld)\n", fd, mmuR2V(pm, buf), nbytes);
 #endif
         sret = write(fd, buf, nbytes);
         if (sret < 0) {
@@ -429,6 +446,25 @@ void mysyscall16(machine_t *pm) {
             *pBE_reply_type = htons(-errno & 0xffff);
         } else {
             *pBE_reply_type = htons(ret & 0xffff);
+        }
+        break;
+    case 7:
+        // wait
+        assert(mmfs == MM);
+        setM1(&m, vraw, pm);
+#if MY_STRACE
+        fprintf(stderr, "/ wait(&status)\n");
+#endif
+        int wstatus;
+        ret = wait(&wstatus);
+        if (ret < 0) {
+            *pBE_reply_type = htons(-errno & 0xffff);
+        } else {
+            *pBE_reply_type = htons(ret & 0xffff);
+            *pBE_reply_i1 = htons(wstatus & 0xffff);
+#if MY_STRACE
+            fprintf(stderr, "/ [DBG] pid: %d (status: %04x)\n", ret, wstatus);
+#endif
         }
         break;
     case 12:
@@ -613,9 +649,13 @@ void mysyscall16(machine_t *pm) {
         int sig = m.m6_i1;
         uintptr_t func = m.m6_f1;
         if (func == (uintptr_t)SIG_DFL/* 0 */ || func == (uintptr_t)SIG_IGN/* 1 */) {
+#if MY_STRACE
             fprintf(stderr, "/ signal(%d, %08lx)\n", sig, func);
+#endif
             func = (uintptr_t)signal(sig, (__sighandler_t)func);
+#if MY_STRACE
             fprintf(stderr, "/ [DBG] ret=%08lx\n", func);
+#endif
             if (func == (uintptr_t)SIG_ERR) {
                 *pBE_reply_type = htons(-errno & 0xffff);
             } else {
