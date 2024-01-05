@@ -62,11 +62,16 @@ typedef struct machine_tag machine_t;
 #endif
 
 bool serializeArgvReal(machine_t *pm, int argc, char *argv[]);
+int serializeArgvVirt16(machine_t *pm, uint8_t *argv);
+int serializeArgvVirt(machine_t *pm, uint32_t vaddr);
+
 bool load(machine_t *pm, const char *src);
 
 uint16_t pushArgs16(machine_t *pm, uint16_t stackAddr);
 uint32_t pushArgs(machine_t *pm, uint32_t stackAddr);
 
+
+// MMU
 static inline uint8_t *mmuV2R(machine_t *pm, uint32_t vaddr) {
     //return (vaddr != 0) ? &pm->virtualMemory[vaddr & 0xffff] : NULL;
     return &pm->virtualMemory[vaddr & 0xffff];
@@ -74,4 +79,26 @@ static inline uint8_t *mmuV2R(machine_t *pm, uint32_t vaddr) {
 static inline uint32_t mmuR2V(machine_t *pm, uint8_t *raddr) {
     //return (raddr != NULL) ? (raddr - pm->virtualMemory) & 0xffff : 0;
     return (raddr - pm->virtualMemory) & 0xffff;
+}
+
+// 16-bit LE
+static inline uint16_t read16(const uint8_t *p) {
+    return p[0] | (p[1] << 8);
+}
+static inline void write16(uint8_t *p, uint16_t data) {
+    p[0] = data & 0xff;
+    p[1] = data >> 8;
+}
+
+// TODO: virtual memory page をまたぐと動かない
+
+// 32-bit BE
+static inline uint32_t read32(uint8_t *p) {
+    return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
+}
+static inline void write32(uint8_t *p, uint32_t data) {
+    p[0] = data >> 24;
+    p[1] = (data >> 16) & 0xff;
+    p[2] = (data >> 8) & 0xff;
+    p[3] = data & 0xff;
 }

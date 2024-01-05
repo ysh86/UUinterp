@@ -20,7 +20,6 @@
 #include "../m68k/src/cpu.h"
 #else
 #include "../pdp11/src/cpu.h"
-#include "../pdp11/src/util.h"
 #endif
 #include "util.h"
 
@@ -268,6 +267,7 @@ void mysyscall16(machine_t *pm) {
     int flags;
     ssize_t sret;
     int ret;
+    int e;
 
     uint16_t sendrec = getD0(pm->cpu) & 0xffff;
     assert(sendrec == BOTH);
@@ -373,7 +373,9 @@ void mysyscall16(machine_t *pm) {
         buf = m.m1_p1;
         nbytes = m.m1_i2;
 #if MY_STRACE
-        fprintf(stderr, "/ write(%d, %08x, %ld)\n", fd, mmuR2V(pm, buf), nbytes);
+        if (fd != STDOUT_FILENO && fd != STDERR_FILENO) {
+            fprintf(stderr, "/ write(%d, %08x, %ld)\n", fd, mmuR2V(pm, buf), nbytes);
+        }
 #endif
         sret = write(fd, buf, nbytes);
         if (sret < 0) {
@@ -653,18 +655,18 @@ void mysyscall16(machine_t *pm) {
             fprintf(stderr, "/ signal(%d, %08lx)\n", sig, func);
 #endif
             func = (uintptr_t)signal(sig, (__sighandler_t)func);
+            e = errno;
 #if MY_STRACE
             fprintf(stderr, "/ [DBG] ret=%08lx\n", func);
 #endif
             if (func == (uintptr_t)SIG_ERR) {
-                *pBE_reply_type = htons(-errno & 0xffff);
+                *pBE_reply_type = htons(-e & 0xffff);
             } else {
                 *pBE_reply_type = htons(func & 0xffff);
             }
         } else {
             fprintf(stderr, "/ [WRN] ignore signal(%d, %08lx)\n", sig, func);
-            errno = EINVAL;
-            *pBE_reply_type = htons(-errno & 0xffff);
+            *pBE_reply_type = htons(-EINVAL & 0xffff);
         }
         break;
     case 54:
@@ -684,13 +686,54 @@ void mysyscall16(machine_t *pm) {
         fprintf(stderr, "/ isatty(%d)\n", fd);
 #endif
         ret = isatty(fd);
+        e = errno;
 #if MY_STRACE
         fprintf(stderr, "/ [DBG] ret=%d\n", ret);
 #endif
         if (ret == 0) {
-            *pBE_reply_type = htons(-errno & 0xffff);
+            *pBE_reply_type = htons(-e & 0xffff);
         } else {
             *pBE_reply_type = htons(ret & 0xffff);
+        }
+        break;
+    case 59:
+        // exec
+        assert(mmfs == MM);
+        setM1(&m, vraw, pm);
+        const char *exec_name = (const char *)m.m1_p1;
+        uint8_t *stack_ptr = m.m1_p2;
+#if MY_STRACE
+        size_t exec_len = m.m1_i1;
+        size_t stack_bytes = m.m1_i2;
+        fprintf(stderr, "/ exec(\"%s\"(%ld), %08x[%ld])\n", exec_name, exec_len, mmuR2V(pm, stack_ptr), stack_bytes);
+        for (size_t i = 0; i < stack_bytes; i += 16) {
+            fprintf(stderr, "/ [DBG] %08x:", mmuR2V(pm, stack_ptr+i));
+            for (size_t j = 0; j < 16; ++j) {
+                if (i + j < stack_bytes) {
+                    fprintf(stderr, " %02x", stack_ptr[i + j]);
+                }
+            }
+            fprintf(stderr, "\n");
+        }
+#endif
+        // calc size of args & copy args
+        ret = serializeArgvVirt(pm, mmuR2V(pm, stack_ptr));
+        if (ret < 0) {
+            pm->argc = 0;
+            pm->argsbytes = 0;
+            *pBE_reply_type = htons(-E2BIG & 0xffff);
+        } else {
+            if (!load(pm, exec_name)) {
+                *pBE_reply_type = htons(-ENOEXEC & 0xffff);
+            } else {
+                *pBE_reply_type = 0;
+
+                // goto the end of the memory, then run the new text
+                uint32_t isp = getISP(pm->cpu);
+                assert((isp & 1) == 0); // isp is word-aligned.
+                *(uint16_t *)(mmuV2R(pm, isp+2)) = 0xffff;
+                *(uint16_t *)(mmuV2R(pm, isp+4)) = 0xffff;
+            }
         }
         break;
     default:
@@ -706,36 +749,6 @@ void syscallString16(machine_t *pm, char *str, size_t size, uint8_t id) {
     */
 }
 #else
-static int serializeArgvVirt(machine_t *pm, uint8_t *argv) {
-    uint16_t na = 0;
-    uint16_t nc = 0;
-
-    uint16_t vaddr = read16(false, argv);
-    argv += 2;
-    while (vaddr != 0) {
-        const char *pa = (const char *)&pm->virtualMemory[vaddr];
-        // debug
-        //fprintf(stderr, "/ [DBG]   argv[%d]: %s\n", na, pa);
-        vaddr = read16(false, argv);
-        argv += 2;
-        na++;
-
-        do {
-            pm->args[nc++] = *pa;
-            if (nc >= sizeof(pm->args) - 1) {
-                return -1;
-            }
-        } while (*pa++ != '\0');
-    }
-    if (nc & 1) {
-        pm->args[nc++] = '\0';
-    }
-
-    pm->argc = na;
-    pm->argsbytes = nc;
-    return 0;
-}
-
 static void convstat16(uint8_t *pi, const struct stat* ps) {
     struct inode {
         char  minor;         /* +0: minor device of i-node */
@@ -876,7 +889,7 @@ void mysyscall16(machine_t *pm) {
                 p[0] = ent->d_ino & 0xff;
                 p[1] = (ent->d_ino >> 8) & 0xff;
                 // name
-                strncpy((char *)&p[2], ent->d_name, 16 - 2);
+                memcpy((char *)&p[2], ent->d_name, 16 - 2);
                 sret = word1;
             }
         } else {
@@ -1031,7 +1044,7 @@ void mysyscall16(machine_t *pm) {
         //fprintf(stderr, "/ [DBG]   %s\n", (const char *)&pm->virtualMemory[word0]);
 
         // calc size of args & copy args
-        ret = serializeArgvVirt(pm, &pm->virtualMemory[word1]);
+        ret = serializeArgvVirt16(pm, &pm->virtualMemory[word1]);
         if (ret < 0) {
             //fprintf(stderr, "/ [ERR] Too big argv\n");
             pm->argc = 0;

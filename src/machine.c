@@ -26,6 +26,97 @@ bool serializeArgvReal(machine_t *pm, int argc, char *argv[]) {
     return true;
 }
 
+int serializeArgvVirt16(machine_t *pm, uint8_t *argv) {
+    uint16_t na = 0;
+    uint16_t nc = 0;
+
+    uint16_t vaddr = read16(argv);
+    argv += 2;
+    while (vaddr != 0) {
+        const char *pa = (const char *)&pm->virtualMemory[vaddr];
+
+        vaddr = read16(argv);
+        argv += 2;
+        na++;
+
+        do {
+            pm->args[nc++] = *pa;
+            if (nc >= sizeof(pm->args) - 1) {
+                return -1;
+            }
+        } while (*pa++ != '\0');
+    }
+    if (nc & 1) {
+        pm->args[nc++] = '\0';
+    }
+
+    pm->argc = na;
+    pm->argsbytes = nc;
+    return 0;
+}
+
+// TODO: virtual memory page をまたぐと動かない
+int serializeArgvVirt(machine_t *pm, uint32_t vaddr) {
+    uint32_t na = 0;
+    uint32_t nc = 0;
+
+    uint32_t vp = vaddr;
+    uint32_t argc = read32(mmuV2R(pm, vp));
+    vp += 4;
+
+    // args
+    uint32_t varg = vaddr + read32(mmuV2R(pm, vp));
+    vp += 4;
+    while (varg > vaddr) {
+        const char *pa = (const char *)mmuV2R(pm, varg);
+
+        varg = vaddr + read32(mmuV2R(pm, vp));
+        vp += 4;
+        na++;
+
+        //fprintf(stderr, "debug varg=%08x: ", mmuR2V(pm, pa));
+        do {
+            //if (*pa != '\0') fprintf(stderr, "%c", *pa);
+            pm->args[nc++] = *pa;
+            if (nc >= sizeof(pm->args) - 1) {
+                return -1;
+            }
+        } while (*pa++ != '\0');
+        //fprintf(stderr, "\n");
+    }
+    if (nc & 1) {
+        pm->args[nc++] = '\0';
+    }
+
+    // envs
+    uint32_t venv = vaddr + read32(mmuV2R(pm, vp));
+    vp += 4;
+    while (venv > vaddr) {
+        const char *pa = (const char *)mmuV2R(pm, venv);
+
+        venv = vaddr + read32(mmuV2R(pm, vp));
+        vp += 4;
+
+        //fprintf(stderr, "debug venv=%08x: ", mmuR2V(pm, pa));
+        do {
+            //if (*pa != '\0') fprintf(stderr, "%c", *pa);
+            pm->args[nc++] = *pa;
+            if (nc >= sizeof(pm->args) - 1) {
+                return -1;
+            }
+        } while (*pa++ != '\0');
+        //fprintf(stderr, "\n");
+    }
+    if (nc & 1) {
+        pm->args[nc++] = '\0';
+    }
+
+    assert(na == argc);
+    pm->argc = na;
+    pm->argsbytes = nc;
+    return 0;
+}
+
 bool load(machine_t *pm, const char *src) {
     char name[PATH_MAX];
     addroot(name, sizeof(name), src, pm->rootdir);
@@ -67,8 +158,8 @@ bool load(machine_t *pm, const char *src) {
         pm->aout.headerBE[7] = ntohl(pm->aout.headerBE[7]);
     }
 
-    size = sizeof(pm->virtualMemory);
-    n = fread(pm->virtualMemory, 1, size, fp);
+    size = sizeof(pm->virtualMemory) - pm->textStart;
+    n = fread(&pm->virtualMemory[pm->textStart], 1, size, fp);
     if (n <= 0) {
         fclose(fp);
         return false;
@@ -77,12 +168,6 @@ bool load(machine_t *pm, const char *src) {
     fp = NULL;
 
     return true;
-}
-
-// 16-bit LE
-static inline void write16(uint8_t *p, uint16_t data) {
-    p[0] = data & 0xff;
-    p[1] = data >> 8;
 }
 
 uint16_t pushArgs16(machine_t *pm, uint16_t stackAddr) {
@@ -116,14 +201,6 @@ uint16_t pushArgs16(machine_t *pm, uint16_t stackAddr) {
     write16(rsp, 0xffff);
 
     return vsp;
-}
-
-// 32-bit BE
-static inline void write32(uint8_t *p, uint32_t data) {
-    p[0] = data >> 24;
-    p[1] = (data >> 16) & 0xff;
-    p[2] = (data >> 8) & 0xff;
-    p[3] = data & 0xff;
 }
 
 // TODO: virtual memory page をまたぐと動かない
