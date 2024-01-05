@@ -723,8 +723,9 @@ void mysyscall16(machine_t *pm) {
             pm->argsbytes = 0;
             *pBE_reply_type = htons(-E2BIG & 0xffff);
         } else {
-            if (!load(pm, exec_name)) {
-                *pBE_reply_type = htons(-ENOEXEC & 0xffff);
+            ret = load(pm, exec_name);
+            if (ret != 0) {
+                *pBE_reply_type = htons(-ret & 0xffff);
             } else {
                 *pBE_reply_type = 0;
 
@@ -1052,7 +1053,8 @@ void mysyscall16(machine_t *pm) {
             pm->cpu->r0 = 0xffff;
             setC(pm->cpu); // error bit
         } else {
-            if (!load(pm, (const char *)&pm->virtualMemory[word0])) {
+            ret = load(pm, (const char *)&pm->virtualMemory[word0]);
+            if (ret != 0) {
                 pm->cpu->r0 = 0xffff;
                 setC(pm->cpu); // error bit
             } else {

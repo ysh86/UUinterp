@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <assert.h>
 
+#include <errno.h>
+
 #include "machine.h"
 #include "util.h"
 
@@ -126,16 +128,19 @@ int serializeArgvVirt(machine_t *pm, uint32_t vaddr) {
     return 0;
 }
 
-bool load(machine_t *pm, const char *src) {
+int load(machine_t *pm, const char *src) {
+    int e = 0;
+
     char name[PATH_MAX];
     addroot(name, sizeof(name), src, pm->rootdir);
     printf("\n/ loading: %s (orig: %s)\n", name, src);
 
     FILE *fp;
     fp = fopen(name, "rb");
+    e = errno;
     if (fp == NULL) {
         perror("/ [ERR] machine::load()");
-        return false;
+        return e;
     }
 
     size_t n;
@@ -144,7 +149,7 @@ bool load(machine_t *pm, const char *src) {
     n = fread(pm->aout.header, 1, size, fp);
     if (n != size) {
         fclose(fp);
-        return false;
+        return ENOEXEC;
     }
 
     if (!IS_MAGIC_BE(pm->aout.headerBE[0])) {
@@ -155,7 +160,7 @@ bool load(machine_t *pm, const char *src) {
         n = fread(&pm->aout.headerBE[4], 1, size, fp);
         if (n != size) {
             fclose(fp);
-            return false;
+            return ENOEXEC;
         }
 
         pm->aout.headerBE[1] = ntohl(pm->aout.headerBE[1]) & 0xff;
@@ -171,12 +176,12 @@ bool load(machine_t *pm, const char *src) {
     n = fread(&pm->virtualMemory[pm->textStart], 1, size, fp);
     if (n <= 0) {
         fclose(fp);
-        return false;
+        return ENOEXEC;
     }
     fclose(fp);
     fp = NULL;
 
-    return true;
+    return 0;
 }
 
 uint16_t pushArgs16(machine_t *pm, uint16_t stackAddr) {

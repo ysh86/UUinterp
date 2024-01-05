@@ -62,7 +62,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "/ [ERR] Too big argv\n");
         return EXIT_FAILURE;
     }
-    if (!load(&machine, (const char *)machine.args)) {
+    if (load(&machine, (const char *)machine.args)) {
         fprintf(stderr, "/ [ERR] Can't load file\n");
         return EXIT_FAILURE;
     }

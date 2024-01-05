@@ -66,7 +66,7 @@ bool serializeArgvReal(machine_t *pm, int argc, char *argv[]);
 int serializeArgvVirt16(machine_t *pm, uint8_t *argv);
 int serializeArgvVirt(machine_t *pm, uint32_t vaddr);
 
-bool load(machine_t *pm, const char *src);
+int load(machine_t *pm, const char *src);
 
 uint16_t pushArgs16(machine_t *pm, uint16_t stackAddr);
 uint32_t pushArgs(machine_t *pm, uint32_t stackAddr);
