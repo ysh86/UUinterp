@@ -34,7 +34,8 @@ struct machine_tag {
     char rootdir[PATH_MAX];
     char curdir[PATH_MAX];
     int argc;
-    uint8_t args[512];
+    int envc;
+    uint8_t args[512+4096];
     size_t argsbytes;
 
     // aout

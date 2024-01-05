@@ -7,6 +7,7 @@
 bool serializeArgvReal(machine_t *pm, int argc, char *argv[]) {
     assert(argv[argc] == NULL);
 
+    // args
     size_t nc = 0;
     for (int i = 0; i < argc; i++) {
         const char *pa = argv[i];
@@ -21,7 +22,11 @@ bool serializeArgvReal(machine_t *pm, int argc, char *argv[]) {
         pm->args[nc++] = '\0';
     }
 
+    // envs
+    int ne = 0;
+
     pm->argc = argc;
+    pm->envc = ne;
     pm->argsbytes = nc;
     return true;
 }
@@ -51,6 +56,7 @@ int serializeArgvVirt16(machine_t *pm, uint8_t *argv) {
     }
 
     pm->argc = na;
+    pm->envc = 0;
     pm->argsbytes = nc;
     return 0;
 }
@@ -58,6 +64,7 @@ int serializeArgvVirt16(machine_t *pm, uint8_t *argv) {
 // TODO: virtual memory page をまたぐと動かない
 int serializeArgvVirt(machine_t *pm, uint32_t vaddr) {
     uint32_t na = 0;
+    uint32_t ne = 0;
     uint32_t nc = 0;
 
     uint32_t vp = vaddr;
@@ -96,6 +103,7 @@ int serializeArgvVirt(machine_t *pm, uint32_t vaddr) {
 
         venv = vaddr + read32(mmuV2R(pm, vp));
         vp += 4;
+        ne++;
 
         //fprintf(stderr, "debug venv=%08x: ", mmuR2V(pm, pa));
         do {
@@ -113,6 +121,7 @@ int serializeArgvVirt(machine_t *pm, uint32_t vaddr) {
 
     assert(na == argc);
     pm->argc = na;
+    pm->envc = ne;
     pm->argsbytes = nc;
     return 0;
 }
@@ -172,6 +181,7 @@ bool load(machine_t *pm, const char *src) {
 
 uint16_t pushArgs16(machine_t *pm, uint16_t stackAddr) {
     // argc, argv[0]...argv[na-1], -1, buf
+    assert(pm->envc == 0);
     const uint16_t na = pm->argc;
     const uint16_t vsp = stackAddr - (2 + na * 2 + 2 + pm->argsbytes);
     uint8_t *rsp = mmuV2R(pm, vsp);
@@ -205,34 +215,53 @@ uint16_t pushArgs16(machine_t *pm, uint16_t stackAddr) {
 
 // TODO: virtual memory page をまたぐと動かない
 uint32_t pushArgs(machine_t *pm, uint32_t stackAddr) {
-    // argc, argv[0]...argv[na-1], NULL, buf
+    // argc, argv[0]...argv[na-1], NULL, envp[0]...envp[ne-1], NULL, buf
     const uint32_t na = pm->argc;
-    const uint32_t vsp = stackAddr - (4 + na * 4 + 4 + pm->argsbytes);
+    const uint32_t ne = pm->envc;
+    const uint32_t vsp = stackAddr - (4 + na * 4 + 4 + ne * 4 + 4 + pm->argsbytes);
     uint8_t *rsp = mmuV2R(pm, vsp);
-    uint8_t *pbuf = rsp + 4 + na * 4 + 4;
+    uint8_t *pbuf = rsp + 4 + na * 4 + 4 + ne * 4 + 4;
 
     // argc
     write32(rsp, na);
     rsp += 4;
 
-    // argv & buf
     const uint8_t *pa = pm->args;
+    uint32_t vaddr = mmuR2V(pm, pbuf);
+
+    // argv & buf
     for (int i = 0; i < na; i++) {
-        uint32_t vaddr = mmuR2V(pm, pbuf);
         write32(rsp, vaddr);
         rsp += 4;
         do {
             *pbuf++ = *pa;
         } while (*pa++ != '\0');
+        vaddr = mmuR2V(pm, pbuf);
     }
-
-    uint32_t vaddr = mmuR2V(pm, pbuf);
     if (vaddr & 1) {
-        *pbuf = '\0'; // alignment
+        *pbuf++ = '\0'; // alignment
+        vaddr = mmuR2V(pm, pbuf);
     }
-
     // NULL
     write32(rsp, (uintptr_t)NULL);
+    rsp += 4;
+
+    // envp & buf
+    for (int i = 0; i < ne; i++) {
+        write32(rsp, vaddr);
+        rsp += 4;
+        do {
+            *pbuf++ = *pa;
+        } while (*pa++ != '\0');
+        vaddr = mmuR2V(pm, pbuf);
+    }
+    if (vaddr & 1) {
+        *pbuf++ = '\0'; // alignment
+        vaddr = mmuR2V(pm, pbuf);
+    }
+    // NULL
+    write32(rsp, (uintptr_t)NULL);
+    rsp += 4;
 
     return vsp;
 }
