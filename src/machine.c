@@ -1,12 +1,15 @@
 #include <stdio.h>
 #include <assert.h>
 
+#include <errno.h>
+
 #include "machine.h"
 #include "util.h"
 
 bool serializeArgvReal(machine_t *pm, int argc, char *argv[]) {
     assert(argv[argc] == NULL);
 
+    // args
     size_t nc = 0;
     for (int i = 0; i < argc; i++) {
         const char *pa = argv[i];
@@ -21,21 +24,123 @@ bool serializeArgvReal(machine_t *pm, int argc, char *argv[]) {
         pm->args[nc++] = '\0';
     }
 
+    // envs
+    int ne = 0;
+
     pm->argc = argc;
+    pm->envc = ne;
     pm->argsbytes = nc;
     return true;
 }
 
-bool load(machine_t *pm, const char *src) {
+int serializeArgvVirt16(machine_t *pm, uint8_t *argv) {
+    uint16_t na = 0;
+    uint16_t nc = 0;
+
+    uint16_t vaddr = read16(argv);
+    argv += 2;
+    while (vaddr != 0) {
+        const char *pa = (const char *)&pm->virtualMemory[vaddr];
+
+        vaddr = read16(argv);
+        argv += 2;
+        na++;
+
+        do {
+            pm->args[nc++] = *pa;
+            if (nc >= sizeof(pm->args) - 1) {
+                return -1;
+            }
+        } while (*pa++ != '\0');
+    }
+    if (nc & 1) {
+        pm->args[nc++] = '\0';
+    }
+
+    pm->argc = na;
+    pm->envc = 0;
+    pm->argsbytes = nc;
+    return 0;
+}
+
+// TODO: virtual memory page をまたぐと動かない
+int serializeArgvVirt(machine_t *pm, uint32_t vaddr) {
+    uint32_t na = 0;
+    uint32_t ne = 0;
+    uint32_t nc = 0;
+
+    uint32_t vp = vaddr;
+    uint32_t argc = read32(mmuV2R(pm, vp));
+    vp += 4;
+
+    // args
+    uint32_t varg = vaddr + read32(mmuV2R(pm, vp));
+    vp += 4;
+    while (varg > vaddr) {
+        const char *pa = (const char *)mmuV2R(pm, varg);
+
+        varg = vaddr + read32(mmuV2R(pm, vp));
+        vp += 4;
+        na++;
+
+        //fprintf(stderr, "debug varg=%08x: ", mmuR2V(pm, pa));
+        do {
+            //if (*pa != '\0') fprintf(stderr, "%c", *pa);
+            pm->args[nc++] = *pa;
+            if (nc >= sizeof(pm->args) - 1) {
+                return -1;
+            }
+        } while (*pa++ != '\0');
+        //fprintf(stderr, "\n");
+    }
+    if (nc & 1) {
+        pm->args[nc++] = '\0';
+    }
+
+    // envs
+    uint32_t venv = vaddr + read32(mmuV2R(pm, vp));
+    vp += 4;
+    while (venv > vaddr) {
+        const char *pa = (const char *)mmuV2R(pm, venv);
+
+        venv = vaddr + read32(mmuV2R(pm, vp));
+        vp += 4;
+        ne++;
+
+        //fprintf(stderr, "debug venv=%08x: ", mmuR2V(pm, pa));
+        do {
+            //if (*pa != '\0') fprintf(stderr, "%c", *pa);
+            pm->args[nc++] = *pa;
+            if (nc >= sizeof(pm->args) - 1) {
+                return -1;
+            }
+        } while (*pa++ != '\0');
+        //fprintf(stderr, "\n");
+    }
+    if (nc & 1) {
+        pm->args[nc++] = '\0';
+    }
+
+    assert(na == argc);
+    pm->argc = na;
+    pm->envc = ne;
+    pm->argsbytes = nc;
+    return 0;
+}
+
+int load(machine_t *pm, const char *src) {
+    int e = 0;
+
     char name[PATH_MAX];
     addroot(name, sizeof(name), src, pm->rootdir);
     printf("\n/ loading: %s (orig: %s)\n", name, src);
 
     FILE *fp;
     fp = fopen(name, "rb");
+    e = errno;
     if (fp == NULL) {
         perror("/ [ERR] machine::load()");
-        return false;
+        return e;
     }
 
     size_t n;
@@ -44,7 +149,7 @@ bool load(machine_t *pm, const char *src) {
     n = fread(pm->aout.header, 1, size, fp);
     if (n != size) {
         fclose(fp);
-        return false;
+        return ENOEXEC;
     }
 
     if (!IS_MAGIC_BE(pm->aout.headerBE[0])) {
@@ -55,7 +160,7 @@ bool load(machine_t *pm, const char *src) {
         n = fread(&pm->aout.headerBE[4], 1, size, fp);
         if (n != size) {
             fclose(fp);
-            return false;
+            return ENOEXEC;
         }
 
         pm->aout.headerBE[1] = ntohl(pm->aout.headerBE[1]) & 0xff;
@@ -67,26 +172,21 @@ bool load(machine_t *pm, const char *src) {
         pm->aout.headerBE[7] = ntohl(pm->aout.headerBE[7]);
     }
 
-    size = sizeof(pm->virtualMemory);
-    n = fread(pm->virtualMemory, 1, size, fp);
+    size = sizeof(pm->virtualMemory) - pm->textStart;
+    n = fread(&pm->virtualMemory[pm->textStart], 1, size, fp);
     if (n <= 0) {
         fclose(fp);
-        return false;
+        return ENOEXEC;
     }
     fclose(fp);
     fp = NULL;
 
-    return true;
-}
-
-// 16-bit LE
-static inline void write16(uint8_t *p, uint16_t data) {
-    p[0] = data & 0xff;
-    p[1] = data >> 8;
+    return 0;
 }
 
 uint16_t pushArgs16(machine_t *pm, uint16_t stackAddr) {
     // argc, argv[0]...argv[na-1], -1, buf
+    assert(pm->envc == 0);
     const uint16_t na = pm->argc;
     const uint16_t vsp = stackAddr - (2 + na * 2 + 2 + pm->argsbytes);
     uint8_t *rsp = mmuV2R(pm, vsp);
@@ -118,44 +218,55 @@ uint16_t pushArgs16(machine_t *pm, uint16_t stackAddr) {
     return vsp;
 }
 
-// 32-bit BE
-static inline void write32(uint8_t *p, uint32_t data) {
-    p[0] = data >> 24;
-    p[1] = (data >> 16) & 0xff;
-    p[2] = (data >> 8) & 0xff;
-    p[3] = data & 0xff;
-}
-
 // TODO: virtual memory page をまたぐと動かない
 uint32_t pushArgs(machine_t *pm, uint32_t stackAddr) {
-    // argc, argv[0]...argv[na-1], NULL, buf
+    // argc, argv[0]...argv[na-1], NULL, envp[0]...envp[ne-1], NULL, buf
     const uint32_t na = pm->argc;
-    const uint32_t vsp = stackAddr - (4 + na * 4 + 4 + pm->argsbytes);
+    const uint32_t ne = pm->envc;
+    const uint32_t vsp = stackAddr - (4 + na * 4 + 4 + ne * 4 + 4 + pm->argsbytes);
     uint8_t *rsp = mmuV2R(pm, vsp);
-    uint8_t *pbuf = rsp + 4 + na * 4 + 4;
+    uint8_t *pbuf = rsp + 4 + na * 4 + 4 + ne * 4 + 4;
 
     // argc
     write32(rsp, na);
     rsp += 4;
 
-    // argv & buf
     const uint8_t *pa = pm->args;
+    uint32_t vaddr = mmuR2V(pm, pbuf);
+
+    // argv & buf
     for (int i = 0; i < na; i++) {
-        uint32_t vaddr = mmuR2V(pm, pbuf);
         write32(rsp, vaddr);
         rsp += 4;
         do {
             *pbuf++ = *pa;
         } while (*pa++ != '\0');
+        vaddr = mmuR2V(pm, pbuf);
     }
-
-    uint32_t vaddr = mmuR2V(pm, pbuf);
     if (vaddr & 1) {
-        *pbuf = '\0'; // alignment
+        *pbuf++ = '\0'; // alignment
+        vaddr = mmuR2V(pm, pbuf);
     }
-
     // NULL
     write32(rsp, (uintptr_t)NULL);
+    rsp += 4;
+
+    // envp & buf
+    for (int i = 0; i < ne; i++) {
+        write32(rsp, vaddr);
+        rsp += 4;
+        do {
+            *pbuf++ = *pa;
+        } while (*pa++ != '\0');
+        vaddr = mmuR2V(pm, pbuf);
+    }
+    if (vaddr & 1) {
+        *pbuf++ = '\0'; // alignment
+        vaddr = mmuR2V(pm, pbuf);
+    }
+    // NULL
+    write32(rsp, (uintptr_t)NULL);
+    rsp += 4;
 
     return vsp;
 }

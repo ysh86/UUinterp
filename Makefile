@@ -13,21 +13,31 @@ INC_FLAGS := $(addprefix -I,$(INC_DIRS))
 # pkgconfig
 # none
 
-CPPFLAGS ?= $(INC_FLAGS) -MMD -MP -D_POSIX_C_SOURCE=200809L
+CPPFLAGS := $(INC_FLAGS) -MMD -MP -D_POSIX_C_SOURCE=200809L
 CPPFLAGS += $(PKG_CONFIG_CFLAGS)
 LDFLAGS += $(PKG_CONFIG_LIBS)
-
-#CPPFLAGS += -DUU_PDP11_V6
-#LDFLAGS += -Lpdp11/build -lpdp11
-CPPFLAGS += -DUU_M68K_MINIX
-LDFLAGS += -Lm68k/build -lm68k
-
 
 CFLAGS += -Wall --std=c99 -O3
 CXXFLAGS += -Wall --std=c++11 -O3
 
 
+.PHONY: all
+all:
+	$(MAKE) m68k
+
+.PHONY: pdp11
+pdp11: CPPFLAGS += -DUU_PDP11_V6
+pdp11: LDFLAGS += -Lpdp11/build -lpdp11
+pdp11: $(BUILD_DIR)/$(TARGET_EXEC)
+
+.PHONY: m68k
+m68k: CPPFLAGS += -DUU_M68K_MINIX
+m68k: LDFLAGS += -Lm68k/build -lm68k
+m68k: $(BUILD_DIR)/$(TARGET_EXEC)
+
+
 $(BUILD_DIR)/$(TARGET_EXEC): $(OBJS)
+	$(MKDIR_P) $(BUILD_DIR)
 	$(CC) $(OBJS) -o $@ $(LDFLAGS)
 
 # assembly
@@ -47,10 +57,10 @@ $(BUILD_DIR)/%.cpp.o: %.cpp
 
 
 .PHONY: clean
-
 clean:
-	$(RM) -r $(BUILD_DIR)
+	$(RM) -r $(OBJS) $(DEPS) $(BUILD_DIR)
 
 -include $(DEPS)
 
+RM ?= rm -f
 MKDIR_P ?= mkdir -p

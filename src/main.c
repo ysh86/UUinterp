@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <unistd.h>
+#include <errno.h>
 
 #include "machine.h"
 #ifdef UU_M68K_MINIX
@@ -17,13 +19,14 @@ int main(int argc, char *argv[]) {
     // usage
     //////////////////////////
     if (argc < 3) {
-        fprintf(stderr, "Usage: uuinterp rootdir aout\n");
+        fprintf(stderr, "Usage: uuinterp rootdir aout args...\n");
         return EXIT_FAILURE;
     }
 
     machine_t machine;
     machine.dirfd = -1;
     machine.dirp = NULL;
+    machine.textStart = SIZE_OF_VECTORS;
 
     //////////////////////////
     // env
@@ -31,18 +34,35 @@ int main(int argc, char *argv[]) {
     // skip vm cmd
     argv++;
     argc--;
+    // cur dir
+    {
+        char *p = getcwd(machine.curdir, sizeof(machine.curdir));
+        if (p == NULL) {
+            fprintf(stderr, "%s\n", strerror(errno));
+            return EXIT_FAILURE;
+        }
+    }
     // root dir
-    snprintf(machine.rootdir, sizeof(machine.rootdir), "%s", *argv);
+    {
+        int ret = chdir(*argv);
+        if (ret != 0) {
+            fprintf(stderr, "%s: %s\n", strerror(errno), *argv);
+            return EXIT_FAILURE;
+        }
+        char *p = getcwd(machine.rootdir, sizeof(machine.rootdir));
+        if (p == NULL) {
+            fprintf(stderr, "%s\n", strerror(errno));
+            return EXIT_FAILURE;
+        }
+    }
     argv++;
     argc--;
-    // cur dir
-    snprintf(machine.curdir, sizeof(machine.curdir), "./");
     // aout
     if (!serializeArgvReal(&machine, argc, argv)) {
         fprintf(stderr, "/ [ERR] Too big argv\n");
         return EXIT_FAILURE;
     }
-    if (!load(&machine, (const char *)machine.args)) {
+    if (load(&machine, (const char *)machine.args)) {
         fprintf(stderr, "/ [ERR] Can't load file\n");
         return EXIT_FAILURE;
     }
@@ -50,11 +70,10 @@ int main(int argc, char *argv[]) {
     //////////////////////////
     // memory
     //////////////////////////
-    reloaded:
     uint32_t sp;
+    reloaded:
     if (!IS_MAGIC_BE(machine.aout.headerBE[0])) {
         // PDP-11 V6
-        machine.textStart = SIZE_OF_VECTORS;
         assert(machine.textStart == 0); // vectors not implemented
         machine.textEnd = machine.textStart + machine.aout.header[1];
         machine.dataStart = machine.textEnd;
@@ -83,7 +102,7 @@ int main(int argc, char *argv[]) {
         printf("/ entry:     0x%04x\n", machine.aout.header[5]);
         printf("/ unused:    0x%04x\n", machine.aout.header[6]);
         printf("/ flag:      0x%04x\n", machine.aout.header[7]);
-        printf("/\n");
+        printf("\n");
 
         // bss
         memset(&machine.virtualMemory[machine.bssStart], 0, machine.aout.header[3]);
@@ -92,10 +111,9 @@ int main(int argc, char *argv[]) {
         sp = pushArgs16(&machine, 0);
     } else {
         // m68k Minix
-        machine.textStart = SIZE_OF_VECTORS;
         if (machine.textStart != 0) {
-            memmove(&machine.virtualMemory[machine.textStart], &machine.virtualMemory[0], sizeof(machine.virtualMemory)-machine.textStart);
-            memset(&machine.virtualMemory[0], 0, machine.textStart); // clear vectors
+            // clear vectors
+            memset(&machine.virtualMemory[0], 0, machine.textStart);
         }
         machine.textEnd = machine.textStart + machine.aout.headerBE[2];
         if (IS_SEPARATE(machine.aout.headerBE[0])) {
@@ -131,7 +149,7 @@ int main(int argc, char *argv[]) {
         printf("/ data: 0x%08x-0x%08x\n", machine.dataStart, machine.dataEnd);
         printf("/ bss : 0x%08x-0x%08x\n", machine.bssStart, machine.bssEnd);
         printf("/ brk : 0x%08x-\n",       machine.brk);
-        printf("/\n");
+        printf("\n");
 
         // bss
         memmove(&machine.virtualMemory[machine.brk], &machine.virtualMemory[machine.bssStart], sizeof(machine.virtualMemory)-machine.brk);
