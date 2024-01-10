@@ -261,6 +261,7 @@ void mysyscall16(machine_t *pm) {
 
     const char *name;
     char path0[PATH_MAX];
+    mode_t mode;
     int fd;
     uint8_t *buf;
     size_t nbytes;
@@ -280,6 +281,7 @@ void mysyscall16(machine_t *pm) {
     // reply
     uint16_t *pBE_reply_type = (uint16_t *)(mmuV2R(pm, vraw+2));
     // FS
+    uint16_t *pBE_reply_i2 = (uint16_t *)(mmuV2R(pm, vraw+6));
     uint16_t *pBE_reply_l1_hi = (uint16_t *)(mmuV2R(pm, vraw+10));
     uint16_t *pBE_reply_l1_lo = (uint16_t *)(mmuV2R(pm, vraw+12));
     // MM
@@ -390,17 +392,17 @@ void mysyscall16(machine_t *pm) {
         setM1(&m, vraw, pm);
         //size_t len = m.m1_i1;
         flags = m.m1_i2;
-        int mode = m.m1_i3;
+        mode = m.m1_i3;
         name = (const char *)m.m1_p1;
         if (!(flags & O_CREAT)) {
             setM3(&m, vraw, pm);
             mode = 0;
             name = (const char *)m.m3_p1;
         }
-#if MY_STRACE
-        fprintf(stderr, "/ open(\"%s\", %d, %d) // name len=%d\n", name, flags, mode, m.m1_i1);
-#endif
         addroot(path0, sizeof(path0), name, pm->rootdir);
+#if MY_STRACE
+        fprintf(stderr, "/ open(\"%s\", %d, %06o) // name len=%d, full=%s\n", name, flags, mode, m.m1_i1, path0);
+#endif
         ret = open(path0, flags, mode);
         if (ret < 0) {
             *pBE_reply_type = htons(-errno & 0xffff);
@@ -467,6 +469,25 @@ void mysyscall16(machine_t *pm) {
 #if MY_STRACE
             fprintf(stderr, "/ [DBG] pid: %d (status: %04x)\n", ret, wstatus);
 #endif
+        }
+        break;
+    case 8:
+        // creat
+        assert(mmfs == FS);
+        setM3(&m, vraw, pm);
+        ///size_t len = m.m3_i1;
+        mode = m.m3_i2;
+        name = (const char *)m.m3_p1; // long and short
+        //name = (const char *)&m.m3_ca1[0]; // short only
+        addroot(path0, sizeof(path0), name, pm->rootdir);
+#if MY_STRACE
+        fprintf(stderr, "/ creat(\"%s\", %06o) // name len=%d, full=%s\n", name, mode, m.m3_i1, path0);
+#endif
+        ret = creat(path0, mode);
+        if (ret < 0) {
+            *pBE_reply_type = htons(-errno & 0xffff);
+        } else {
+            *pBE_reply_type = htons(ret & 0xffff);
         }
         break;
     case 12:
@@ -554,12 +575,11 @@ void mysyscall16(machine_t *pm) {
         //size_t len = m.m1_i1;
         name = (const char *)m.m1_p1;
         buf = m.m1_p2;
+        addroot(path0, sizeof(path0), name, pm->rootdir);
 #if MY_STRACE
-        fprintf(stderr, "/ stat(\"%s\", %08x) // name len=%d\n", name, mmuR2V(pm, buf), m.m1_i1);
+        fprintf(stderr, "/ stat(\"%s\", %08x) // name len=%d, full=%s\n", name, mmuR2V(pm, buf), m.m1_i1, path0);
 #endif
         {
-            addroot(path0, sizeof(path0), name, pm->rootdir);
-
             struct stat s;
             ret = stat(path0, &s);
             if (ret < 0) {
@@ -641,6 +661,53 @@ void mysyscall16(machine_t *pm) {
                 fprintf(stderr, "/ [DBG] fstat src: %06o\n", s.st_mode);
                 fprintf(stderr, "/ [DBG] fstat dst: %06o\n", ntohs(*(uint16_t *)(pi + 4)));
 #endif
+            }
+        }
+        break;
+    case 41:
+        // dup, dup2
+        assert(mmfs == FS);
+        setM1(&m, vraw, pm);
+        fd = m.m1_i1;
+        int rfd = fd & ~(0100); // mask to distinguish dup2 from dup
+        int fd2 = m.m1_i2;
+        if (fd == rfd) {
+#if MY_STRACE
+            fprintf(stderr, "/ dup(%d)\n", fd);
+#endif
+            ret = dup(fd);
+        } else {
+#if MY_STRACE
+            fprintf(stderr, "/ dup2(%d, %d)\n", rfd, fd2);
+#endif
+            ret = dup2(rfd, fd2);
+        }
+        if (ret < 0) {
+            *pBE_reply_type = htons(-errno & 0xffff);
+        } else {
+            *pBE_reply_type = htons(ret & 0xffff);
+        }
+        break;
+    case 42:
+        // pipe
+        assert(mmfs == FS);
+        setM1(&m, vraw, pm);
+        {
+#if MY_STRACE
+            fprintf(stderr, "/ pipe()\n");
+#endif
+            int pipefd[2];
+            ret = pipe(pipefd);
+            e = errno;
+#if MY_STRACE
+            fprintf(stderr, "/ [DBG] ret=%d, fd0=%d, fd1=%d\n", ret, pipefd[0], pipefd[1]);
+#endif
+            if (ret < 0) {
+                *pBE_reply_type = htons(-e & 0xffff);
+            } else {
+                *pBE_reply_type = 0;
+                *pBE_reply_i1 = htons(pipefd[0] & 0xffff);
+                *pBE_reply_i2 = htons(pipefd[1] & 0xffff);
             }
         }
         break;
