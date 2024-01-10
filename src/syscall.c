@@ -721,7 +721,7 @@ void mysyscall16(machine_t *pm) {
 #if MY_STRACE
             fprintf(stderr, "/ signal(%d, %08lx)\n", sig, func);
 #endif
-            func = (uintptr_t)signal(sig, (__sighandler_t)func);
+            func = (uintptr_t)signal(sig, (void (*)(int))func);
             e = errno;
 #if MY_STRACE
             fprintf(stderr, "/ [DBG] ret=%08lx\n", func);
