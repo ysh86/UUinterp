@@ -490,6 +490,25 @@ void mysyscall16(machine_t *pm) {
             *pBE_reply_type = htons(ret & 0xffff);
         }
         break;
+    case 10:
+        // unlink
+        assert(mmfs == FS);
+        setM3(&m, vraw, pm);
+        //size_t len = m.m3_i1;
+        //uint16_t zero = m.m3_i2;
+        name = (const char *)m.m3_p1; // long and short
+        //name = (const char *)&m.m3_ca1[0]; // short only
+        addroot(path0, sizeof(path0), name, pm->rootdir);
+#if MY_STRACE
+        fprintf(stderr, "/ unlink(\"%s\") // name len=%d, full=%s\n", name, m.m3_i1, path0);
+#endif
+        ret = unlink(path0);
+        if (ret < 0) {
+            *pBE_reply_type = htons(-errno & 0xffff);
+        } else {
+            *pBE_reply_type = htons(ret & 0xffff);
+        }
+        break;
     case 12:
         // chdir
         assert(mmfs == FS);
@@ -662,6 +681,43 @@ void mysyscall16(machine_t *pm) {
                 fprintf(stderr, "/ [DBG] fstat dst: %06o\n", ntohs(*(uint16_t *)(pi + 4)));
 #endif
             }
+        }
+        break;
+    case 33:
+        // access
+        assert(mmfs == FS);
+        setM3(&m, vraw, pm);
+        //size_t len = m.m3_i1;
+        int fmode = m.m3_i2;
+        name = (const char *)m.m3_p1; // long and short
+        //name = (const char *)&m.m3_ca1[0]; // short only
+        addroot(path0, sizeof(path0), name, pm->rootdir);
+#if MY_STRACE
+        fprintf(stderr, "/ access(\"%s\", %d) // name len=%d, full=%s\n", name, fmode, m.m3_i1, path0);
+#endif
+        ret = access(path0, fmode);
+        if (ret < 0) {
+            *pBE_reply_type = htons(-errno & 0xffff);
+        } else {
+            *pBE_reply_type = htons(ret & 0xffff);
+        }
+        break;
+    case 39:
+        // mkdir
+        assert(mmfs == FS);
+        setM1(&m, vraw, pm);
+        //size_t len = m.m1_i1;
+        mode = m.m1_i2;
+        name = (const char *)m.m1_p1;
+        addroot(path0, sizeof(path0), name, pm->rootdir);
+#if MY_STRACE
+        fprintf(stderr, "/ mkdir(\"%s\", %06o) // name len=%d, full=%s\n", name, mode, m.m1_i1, path0);
+#endif
+        ret = mkdir(name, mode);
+        if (ret < 0) {
+            *pBE_reply_type = htons(-errno & 0xffff);
+        } else {
+            *pBE_reply_type = htons(ret & 0xffff);
         }
         break;
     case 41:
