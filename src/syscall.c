@@ -711,6 +711,17 @@ void mysyscall16(machine_t *pm) {
             }
         }
         break;
+    case 47:
+        // getgid
+        assert(mmfs == MM);
+#if MY_STRACE
+        fprintf(stderr, "/ getgid(),getegid()\n");
+#endif
+        uid_t gid = getgid();
+        uid_t egid = getegid();
+        *pBE_reply_type = htons(gid & 0xffff);
+        *pBE_reply_i1 = htons(egid & 0xffff);
+        break;
     case 48:
         // signal
         assert(mmfs == MM);
