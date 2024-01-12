@@ -46,13 +46,14 @@ struct machine_tag {
 
     // memory
     uint8_t virtualMemory[64 * 1024];
-    uint16_t textStart;
-    uint16_t textEnd;
-    uint16_t dataStart;
-    uint16_t dataEnd;
-    uint16_t bssStart;
-    uint16_t bssEnd;
-    uint16_t brk;
+    size_t sizeOfVM;
+    uint32_t textStart;
+    uint32_t textEnd;
+    uint32_t dataStart;
+    uint32_t dataEnd;
+    uint32_t bssStart;
+    uint32_t bssEnd;
+    uint32_t brk;
 
     // cpu
     cpu_t *cpu;

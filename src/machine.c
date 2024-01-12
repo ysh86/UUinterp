@@ -133,7 +133,7 @@ int load(machine_t *pm, const char *src) {
 
     char name[PATH_MAX];
     addroot(name, sizeof(name), src, pm->rootdir);
-    printf("\n/ loading: %s (orig: %s)\n", name, src);
+    printf("\n/ loading: %s (full: %s)\n", src, name);
 
     FILE *fp;
     fp = fopen(name, "rb");

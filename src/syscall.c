@@ -937,8 +937,13 @@ void mysyscall16(machine_t *pm) {
                 // goto the end of the memory, then run the new text
                 uint32_t isp = getISP(pm->cpu);
                 assert((isp & 1) == 0); // isp is word-aligned.
-                *(uint16_t *)(mmuV2R(pm, isp+2)) = 0xffff;
-                *(uint16_t *)(mmuV2R(pm, isp+4)) = 0xffff;
+                uint32_t eom = pm->sizeOfVM - 1;
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] new ppc: %08x\n", eom-2);
+                fprintf(stderr, "/ [DBG] new pc:  %08x\n", eom);
+#endif
+                *(uint16_t *)(mmuV2R(pm, isp+2)) = htons((eom >> 16) & 0xffff);
+                *(uint16_t *)(mmuV2R(pm, isp+4)) = htons(eom & 0xffff);
             }
         }
         break;
@@ -1275,7 +1280,9 @@ void mysyscall16(machine_t *pm) {
                 setC(pm->cpu); // error bit
             } else {
                 pm->cpu->r0 = 0;
-                pm->cpu->pc = 0xffff; // goto the end of the memory, then run the new text
+                // goto the end of the memory, then run the new text
+                uint32_t eom = pm->sizeOfVM - 1;
+                pm->cpu->pc = eom & 0xffff;
                 clearC(pm->cpu);
             }
         }

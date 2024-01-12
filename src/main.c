@@ -74,6 +74,8 @@ int main(int argc, char *argv[]) {
     reloaded:
     if (!IS_MAGIC_BE(machine.aout.headerBE[0])) {
         // PDP-11 V6
+        machine.sizeOfVM = (sizeof(machine.virtualMemory) < 0x10000) ? sizeof(machine.virtualMemory) : 0x10000;
+
         assert(machine.textStart == 0); // vectors not implemented
         machine.textEnd = machine.textStart + machine.aout.header[1];
         machine.dataStart = machine.textEnd;
@@ -89,7 +91,7 @@ int main(int argc, char *argv[]) {
 
         assert(machine.aout.header[0] == 0x0107 || machine.aout.header[0] == 0x0108);
         assert(machine.aout.header[1] > 0);
-        assert(machine.bssEnd <= 0xfffe);
+        assert(machine.bssEnd <= machine.sizeOfVM - 2);
         // TODO: validate other fields
 
         printf("/ aout header (PDP-11 V6)\n");
@@ -111,6 +113,8 @@ int main(int argc, char *argv[]) {
         sp = pushArgs16(&machine, 0);
     } else {
         // m68k Minix
+        machine.sizeOfVM = sizeof(machine.virtualMemory);
+
         if (machine.textStart != 0) {
             // clear vectors
             memset(&machine.virtualMemory[0], 0, machine.textStart);
@@ -130,7 +134,7 @@ int main(int argc, char *argv[]) {
 
         assert(machine.aout.headerBE[1] == 32);
         assert(machine.aout.headerBE[2] > 0);
-        assert(machine.bssEnd <= 0xfffe);
+        assert(machine.bssEnd <= machine.sizeOfVM - 2);
         assert((machine.brk & 1) == 0);
         // TODO: validate other fields
 
@@ -151,20 +155,22 @@ int main(int argc, char *argv[]) {
         printf("/ brk : 0x%08x-\n",       machine.brk);
         printf("\n");
 
+        // move relocate table
+        memmove(&machine.virtualMemory[machine.brk], &machine.virtualMemory[machine.bssStart], machine.sizeOfVM-machine.brk);
         // bss
-        memmove(&machine.virtualMemory[machine.brk], &machine.virtualMemory[machine.bssStart], sizeof(machine.virtualMemory)-machine.brk);
         memset(&machine.virtualMemory[machine.bssStart], 0, machine.aout.headerBE[4]);
 
         // relocate
+        const int32_t entry = machine.aout.headerBE[5];
         const int32_t offset = machine.textStart;
         uint8_t *paddrs = &machine.virtualMemory[machine.brk];
         int32_t addr = ntohl(*(uint32_t *)paddrs);
         paddrs += 4;
-        if (offset != 0 && addr != 0) {
+        if (offset != entry && addr != 0) {
             addr += offset;
 
             while (1) {
-                assert(addr <= 0x0000fffe);
+                assert(addr <= machine.sizeOfVM - 4);
                 assert(addr < machine.dataEnd);
 
                 int32_t opland = ntohl(*(int32_t *)&machine.virtualMemory[addr]);
@@ -183,7 +189,7 @@ int main(int argc, char *argv[]) {
         }
 
         // stack
-        sp = pushArgs(&machine, sizeof(machine.virtualMemory));
+        sp = pushArgs(&machine, machine.sizeOfVM);
     }
 
     //////////////////////////
@@ -207,7 +213,7 @@ int main(int argc, char *argv[]) {
     {
         // debug dump
         FILE *fp = fopen("dump.bin", "wb");
-        fwrite(machine.virtualMemory, 1, sizeof(machine.virtualMemory), fp);
+        fwrite(machine.virtualMemory, 1, machine.sizeOfVM, fp);
         fclose(fp);
 
         const uint32_t pc = getPC(&cpu);
@@ -237,7 +243,7 @@ int main(int argc, char *argv[]) {
         }
         printf("\n");
         printf("/ stack: sp = %08x\n", sp);
-        int maxj = sizeof(machine.virtualMemory);
+        int maxj = machine.sizeOfVM;
         for (int j = maxj - 256; j < maxj; j += 16) {
             printf("/ %04x:", j);
             for (int i = 0; i < 16; i++) {
@@ -253,7 +259,7 @@ int main(int argc, char *argv[]) {
         const uint32_t pc = getPC(&cpu);
         // TODO: debug
         //assert(pc < machine.textEnd);
-        if (pc >= 0xffff) {
+        if (pc >= machine.sizeOfVM - 1) {
             break;
         }
 
