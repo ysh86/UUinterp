@@ -259,13 +259,15 @@ void setM6(message *m, uint32_t vraw, machine_t *pm) {
 void mysyscall16(machine_t *pm) {
     message m;
 
-    const char *name;
-    char path0[PATH_MAX];
+    const char *name, *name2;
+    char path0[PATH_MAX], path1[PATH_MAX];
     mode_t mode;
     int fd;
     uint8_t *buf;
     size_t nbytes;
     int flags;
+    pid_t pid; // TODO: support 32-bit or warning over 16-bit
+    int sig;
     ssize_t sret;
     int ret;
     int e;
@@ -308,13 +310,13 @@ void mysyscall16(machine_t *pm) {
 #if MY_STRACE
         fprintf(stderr, "/ fork()\n");
 #endif
-        ret = fork();
-        if (ret < 0) {
+        pid = fork();
+        if (pid < 0) {
             *pBE_reply_type = htons(-errno & 0xffff);
         } else {
-            *pBE_reply_type = htons(ret & 0xffff);
+            *pBE_reply_type = htons(pid & 0xffff);
 #if MY_STRACE
-            fprintf(stderr, "/ [DBG] pid: %d (pc: %08x)\n", ret, getPC(pm->cpu));
+            fprintf(stderr, "/ [DBG] pid: %d (pc: %08x)\n", pid, getPC(pm->cpu));
 #endif
         }
         break;
@@ -460,14 +462,14 @@ void mysyscall16(machine_t *pm) {
         fprintf(stderr, "/ wait(&status)\n");
 #endif
         int wstatus;
-        ret = wait(&wstatus);
-        if (ret < 0) {
+        pid = wait(&wstatus);
+        if (pid < 0) {
             *pBE_reply_type = htons(-errno & 0xffff);
         } else {
-            *pBE_reply_type = htons(ret & 0xffff);
+            *pBE_reply_type = htons(pid & 0xffff);
             *pBE_reply_i1 = htons(wstatus & 0xffff);
 #if MY_STRACE
-            fprintf(stderr, "/ [DBG] pid: %d (status: %04x)\n", ret, wstatus);
+            fprintf(stderr, "/ [DBG] pid: %d (status: %04x)\n", pid, wstatus);
 #endif
         }
         break;
@@ -475,7 +477,7 @@ void mysyscall16(machine_t *pm) {
         // creat
         assert(mmfs == FS);
         setM3(&m, vraw, pm);
-        ///size_t len = m.m3_i1;
+        //size_t len = m.m3_i1;
         mode = m.m3_i2;
         name = (const char *)m.m3_p1; // long and short
         //name = (const char *)&m.m3_ca1[0]; // short only
@@ -484,6 +486,26 @@ void mysyscall16(machine_t *pm) {
         fprintf(stderr, "/ creat(\"%s\", %06o) // name len=%d, full=%s\n", name, mode, m.m3_i1, path0);
 #endif
         ret = creat(path0, mode);
+        if (ret < 0) {
+            *pBE_reply_type = htons(-errno & 0xffff);
+        } else {
+            *pBE_reply_type = htons(ret & 0xffff);
+        }
+        break;
+    case 9:
+        // link
+        assert(mmfs == FS);
+        setM1(&m, vraw, pm);
+        //size_t len = m.m1_i1;
+        //size_t len2 = m.m1_i2;
+        name = (const char *)m.m1_p1;
+        name2 = (const char *)m.m1_p2;
+        addroot(path0, sizeof(path0), name, pm->rootdir);
+        addroot(path1, sizeof(path1), name2, pm->rootdir);
+#if MY_STRACE
+        fprintf(stderr, "/ link(\"%s\", \"%s\") // name len=%d, full=%s, len2=%d, full2=%s\n", name, name2, m.m1_i1, path0, m.m1_i2, path1);
+#endif
+        ret = link(path0, path1);
         if (ret < 0) {
             *pBE_reply_type = htons(-errno & 0xffff);
         } else {
@@ -561,6 +583,25 @@ void mysyscall16(machine_t *pm) {
                 *pBE_reply_l1_hi = htons((t>>16) & 0xffff);
                 *pBE_reply_l1_lo = htons(t & 0xffff);
             }
+        }
+        break;
+    case 15:
+        // chmod
+        assert(mmfs == FS);
+        setM3(&m, vraw, pm);
+        //size_t len = m.m3_i1;
+        mode = m.m3_i2;
+        name = (const char *)m.m3_p1; // long and short
+        //name = (const char *)&m.m3_ca1[0]; // short only
+        addroot(path0, sizeof(path0), name, pm->rootdir);
+#if MY_STRACE
+        fprintf(stderr, "/ chmod(\"%s\", %06o) // name len=%d, full=%s\n", name, mode, m.m3_i1, path0);
+#endif
+        ret = chmod(path0, mode);
+        if (ret < 0) {
+            *pBE_reply_type = htons(-errno & 0xffff);
+        } else {
+            *pBE_reply_type = htons(ret & 0xffff);
         }
         break;
     case 17:
@@ -644,7 +685,7 @@ void mysyscall16(machine_t *pm) {
 #if MY_STRACE
         fprintf(stderr, "/ getpid()\n");
 #endif
-        pid_t pid = getpid();
+        pid = getpid();
         *pBE_reply_type = htons(pid & 0xffff);
         break;
     case 24:
@@ -696,6 +737,22 @@ void mysyscall16(machine_t *pm) {
         fprintf(stderr, "/ access(\"%s\", %d) // name len=%d, full=%s\n", name, fmode, m.m3_i1, path0);
 #endif
         ret = access(path0, fmode);
+        if (ret < 0) {
+            *pBE_reply_type = htons(-errno & 0xffff);
+        } else {
+            *pBE_reply_type = htons(ret & 0xffff);
+        }
+        break;
+    case 37:
+        // kill
+        assert(mmfs == MM);
+        setM1(&m, vraw, pm);
+        pid = m.m1_i1;
+        sig = m.m1_i2;
+#if MY_STRACE
+        fprintf(stderr, "/ kill(%d, %d)\n", pid, sig);
+#endif
+        ret = kill(pid, sig);
         if (ret < 0) {
             *pBE_reply_type = htons(-errno & 0xffff);
         } else {
@@ -782,7 +839,7 @@ void mysyscall16(machine_t *pm) {
         // signal
         assert(mmfs == MM);
         setM6(&m, vraw, pm);
-        int sig = m.m6_i1;
+        sig = m.m6_i1;
         uintptr_t func = m.m6_f1;
         if (func == (uintptr_t)SIG_DFL/* 0 */ || func == (uintptr_t)SIG_IGN/* 1 */) {
 #if MY_STRACE
