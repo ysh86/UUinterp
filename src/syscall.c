@@ -206,6 +206,8 @@ void setM2(message *m, uint32_t vraw, machine_t *pm) {
     vaddrH = ntohs(*(uint16_t *)mmuV2R(pm, vraw+18));
     vaddrL = ntohs(*(uint16_t *)mmuV2R(pm, vraw+20));
     vaddr = (vaddrH << 16) | vaddrL;
+    // TODO: don't touch an uninitialized pointer
+    vaddr = 0;
     m->m2_p1 = mmuV2R(pm, vaddr);
 
     return;
@@ -396,19 +398,22 @@ void mysyscall16(machine_t *pm) {
     case 5:
         // open
         assert(mmfs == FS);
-        setM1(&m, vraw, pm);
-        //size_t len = m.m1_i1;
-        flags = m.m1_i2;
-        mode = m.m1_i3;
-        name = (const char *)m.m1_p1;
-        if (!(flags & O_CREAT)) {
+        // common for M1 and M3
+        flags = ntohs(*pBE_reply_i2);
+        if (flags & O_CREAT) {
+            setM1(&m, vraw, pm);
+            mode = m.m1_i3;
+            name = (const char *)m.m1_p1;
+        } else {
             setM3(&m, vraw, pm);
             mode = 0;
             name = (const char *)m.m3_p1;
         }
         addroot(path0, sizeof(path0), name, pm->rootdir);
 #if MY_STRACE
-        fprintf(stderr, "/ open(\"%s\", %d, %06o) // name len=%d, full=%s\n", name, flags, mode, m.m1_i1, path0);
+        // common for M1 and M3
+        int len = ntohs(*pBE_reply_i1);
+        fprintf(stderr, "/ open(\"%s\", %d, %06o) // name len=%d, full=%s\n", name, flags, mode, len, path0);
 #endif
         ret = open(path0, flags, mode);
         if (ret < 0) {
