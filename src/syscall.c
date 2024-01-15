@@ -292,6 +292,11 @@ void mysyscall16(machine_t *pm) {
     uint16_t *pBE_reply_p1_lo = (uint16_t *)(mmuV2R(pm, vraw+20));
 
     uint16_t syscallID = ntohs(*pBE_reply_type);
+#if MY_STRACE
+    if (syscallID != 4) {
+        fprintf(stderr, "/ syscall: %d\n", syscallID);
+    }
+#endif
     switch (syscallID) {
     case 1:
         // exit
@@ -469,7 +474,7 @@ void mysyscall16(machine_t *pm) {
             *pBE_reply_type = htons(pid & 0xffff);
             *pBE_reply_i1 = htons(wstatus & 0xffff);
 #if MY_STRACE
-            fprintf(stderr, "/ [DBG] pid: %d (status: %04x)\n", pid, wstatus);
+            fprintf(stderr, "/ [DBG] wait pid: %d status: %04x\n", pid, wstatus);
 #endif
         }
         break;
@@ -611,9 +616,9 @@ void mysyscall16(machine_t *pm) {
         uint32_t addr = mmuR2V(pm, m.m1_p1);
         uint32_t addr256 = (addr + 255) & ~255;
 #if MY_STRACE
-        fprintf(stderr, "/ brk(%08x) // aligned=%08x\n", addr, addr256);
+        fprintf(stderr, "/ brk(%08x)\n", addr);
         fprintf(stderr, "/   bssEnd: %08x\n", pm->bssEnd);
-        fprintf(stderr, "/   brk:    %08x\n", pm->brk);
+        fprintf(stderr, "/   brk:    %08x -> %08x\n", pm->brk, addr256);
         fprintf(stderr, "/   SP:     %08x\n", getSP(pm->cpu));
 #endif
         if (addr256 < pm->bssEnd || getSP(pm->cpu) < addr256) {
@@ -865,9 +870,9 @@ void mysyscall16(machine_t *pm) {
         assert(mmfs == FS);
         setM2(&m, vraw, pm);
         fd = m.m2_i1;
-        unsigned long request = m.m2_i3;
+        int request = m.m2_i3;
         //uint32_t spek = m.m2_l1;
-        flags = m.m2_l2;
+        //flags = m.m2_l2;
         // support only isatty()
         if (request != TIOCGETP) {
             *pBE_reply_type = htons(-EBADF & 0xffff);
@@ -901,6 +906,7 @@ void mysyscall16(machine_t *pm) {
             fprintf(stderr, "/ [DBG] %08x:", mmuR2V(pm, stack_ptr+i));
             for (size_t j = 0; j < 16; ++j) {
                 if (i + j < stack_bytes) {
+                    if (j == 8) fprintf(stderr, " ");
                     fprintf(stderr, " %02x", stack_ptr[i + j]);
                 }
             }
@@ -916,6 +922,9 @@ void mysyscall16(machine_t *pm) {
         } else {
             ret = load(pm, exec_name);
             if (ret != 0) {
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] load(\"%s\"): %s\n", exec_name, strerror(ret));
+#endif
                 *pBE_reply_type = htons(-ret & 0xffff);
             } else {
                 *pBE_reply_type = 0;
@@ -927,6 +936,17 @@ void mysyscall16(machine_t *pm) {
                 *(uint16_t *)(mmuV2R(pm, isp+4)) = 0xffff;
             }
         }
+        break;
+    case 60:
+        // umask
+        assert(mmfs == FS);
+        setM1(&m, vraw, pm);
+        mode_t mask = m.m1_i1;
+#if MY_STRACE
+        fprintf(stderr, "/ umask(%#03o)\n", mask);
+#endif
+        ret = umask(mask);
+        *pBE_reply_type = htons(ret & 0xffff);
         break;
     default:
         // TODO: not implemented
