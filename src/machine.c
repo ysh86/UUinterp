@@ -3,6 +3,8 @@
 
 #include <errno.h>
 
+#define DEBUG_LOG 0
+
 #include "machine.h"
 #include "util.h"
 
@@ -83,15 +85,21 @@ int serializeArgvVirt(machine_t *pm, uint32_t vaddr) {
         vp += 4;
         na++;
 
-        //fprintf(stderr, "debug varg=%08x: ", mmuR2V(pm, pa));
+#if DEBUG_LOG
+        fprintf(stderr, "/ [DBG] varg=%08x: ", mmuR2V(pm, (uint8_t *)pa));
+#endif
         do {
-            //if (*pa != '\0') fprintf(stderr, "%c", *pa);
+#if DEBUG_LOG
+            if (*pa != '\0') fprintf(stderr, "%c", *pa);
+#endif
             pm->args[nc++] = *pa;
             if (nc >= sizeof(pm->args) - 1) {
                 return -1;
             }
         } while (*pa++ != '\0');
-        //fprintf(stderr, "\n");
+#if DEBUG_LOG
+        fprintf(stderr, "\n");
+#endif
     }
     if (nc & 1) {
         pm->args[nc++] = '\0';
@@ -107,15 +115,21 @@ int serializeArgvVirt(machine_t *pm, uint32_t vaddr) {
         vp += 4;
         ne++;
 
-        //fprintf(stderr, "debug venv=%08x: ", mmuR2V(pm, pa));
+#if DEBUG_LOG
+        fprintf(stderr, "/ [DBG] venv=%08x: ", mmuR2V(pm, (uint8_t *)pa));
+#endif
         do {
-            //if (*pa != '\0') fprintf(stderr, "%c", *pa);
+#if DEBUG_LOG
+            if (*pa != '\0') fprintf(stderr, "%c", *pa);
+#endif
             pm->args[nc++] = *pa;
             if (nc >= sizeof(pm->args) - 1) {
                 return -1;
             }
         } while (*pa++ != '\0');
-        //fprintf(stderr, "\n");
+#if DEBUG_LOG
+        fprintf(stderr, "\n");
+#endif
     }
     if (nc & 1) {
         pm->args[nc++] = '\0';
@@ -129,18 +143,13 @@ int serializeArgvVirt(machine_t *pm, uint32_t vaddr) {
 }
 
 int load(machine_t *pm, const char *src) {
-    int e = 0;
-
     char name[PATH_MAX];
     addroot(name, sizeof(name), src, pm->rootdir);
-    printf("\n/ loading: %s (full: %s)\n", src, name);
 
     FILE *fp;
     fp = fopen(name, "rb");
-    e = errno;
     if (fp == NULL) {
-        perror("/ [ERR] machine::load()");
-        return e;
+        return errno;
     }
 
     size_t n;
