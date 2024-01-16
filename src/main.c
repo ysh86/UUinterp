@@ -58,6 +58,14 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
         }
     }
+    // return to cur dir
+    {
+        int ret = chdir(machine.curdir);
+        if (ret != 0) {
+            fprintf(stderr, "%s: %s\n", strerror(errno), machine.curdir);
+            return EXIT_FAILURE;
+        }
+    }
     argv++;
     argc--;
     // aout
