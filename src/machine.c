@@ -22,12 +22,18 @@ bool serializeArgvReal(machine_t *pm, int argc, char *argv[]) {
             }
         } while (*pa++ != '\0');
     }
-    if (nc & 1) {
-        pm->args[nc++] = '\0';
-    }
 
     // envs
     int ne = 0;
+
+    // alignment
+    if (nc & 1) {
+        pm->args[nc++] = '\0';
+    }
+    if (nc & 2) {
+        pm->args[nc++] = '\0';
+        pm->args[nc++] = '\0';
+    }
 
     pm->argc = argc;
     pm->envc = ne;
@@ -55,7 +61,13 @@ int serializeArgvVirt16(machine_t *pm, uint8_t *argv) {
             }
         } while (*pa++ != '\0');
     }
+
+    // alignment
     if (nc & 1) {
+        pm->args[nc++] = '\0';
+    }
+    if (nc & 2) {
+        pm->args[nc++] = '\0';
         pm->args[nc++] = '\0';
     }
 
@@ -101,9 +113,6 @@ int serializeArgvVirt(machine_t *pm, uint32_t vaddr) {
         fprintf(stderr, "\n");
 #endif
     }
-    if (nc & 1) {
-        pm->args[nc++] = '\0';
-    }
 
     // envs
     uint32_t venv = vaddr + read32(mmuV2R(pm, vp));
@@ -131,7 +140,13 @@ int serializeArgvVirt(machine_t *pm, uint32_t vaddr) {
         fprintf(stderr, "\n");
 #endif
     }
+
+    // alignment
     if (nc & 1) {
+        pm->args[nc++] = '\0';
+    }
+    if (nc & 2) {
+        pm->args[nc++] = '\0';
         pm->args[nc++] = '\0';
     }
 
@@ -205,24 +220,33 @@ uint16_t pushArgs16(machine_t *pm, uint16_t stackAddr) {
     write16(rsp, na);
     rsp += 2;
 
-    // argv & buf
     const uint8_t *pa = pm->args;
+    uint16_t vaddr = mmuR2V(pm, pbuf);
+
+    // argv & buf
     for (int i = 0; i < na; i++) {
-        uint16_t vaddr = mmuR2V(pm, pbuf);
         write16(rsp, vaddr);
         rsp += 2;
         do {
             *pbuf++ = *pa;
         } while (*pa++ != '\0');
+        vaddr = mmuR2V(pm, pbuf);
     }
-
-    uint16_t vaddr = mmuR2V(pm, pbuf);
-    if (vaddr & 1) {
-        *pbuf = '\0'; // alignment
-    }
-
     // -1
     write16(rsp, 0xffff);
+    rsp += 2;
+
+    // alignment
+    if (vaddr & 1) {
+        *pbuf++ = *pa++;
+        vaddr = mmuR2V(pm, pbuf);
+    }
+    if (vaddr & 2) {
+        *pbuf++ = *pa++;
+        vaddr = mmuR2V(pm, pbuf);
+        *pbuf++ = *pa++;
+        vaddr = mmuR2V(pm, pbuf);
+    }
 
     return vsp;
 }
@@ -252,10 +276,6 @@ uint32_t pushArgs(machine_t *pm, uint32_t stackAddr) {
         } while (*pa++ != '\0');
         vaddr = mmuR2V(pm, pbuf);
     }
-    if (vaddr & 1) {
-        *pbuf++ = '\0'; // alignment
-        vaddr = mmuR2V(pm, pbuf);
-    }
     // NULL
     write32(rsp, (uintptr_t)NULL);
     rsp += 4;
@@ -269,13 +289,21 @@ uint32_t pushArgs(machine_t *pm, uint32_t stackAddr) {
         } while (*pa++ != '\0');
         vaddr = mmuR2V(pm, pbuf);
     }
-    if (vaddr & 1) {
-        *pbuf++ = '\0'; // alignment
-        vaddr = mmuR2V(pm, pbuf);
-    }
     // NULL
     write32(rsp, (uintptr_t)NULL);
     rsp += 4;
+
+    // alignment
+    if (vaddr & 1) {
+        *pbuf++ = *pa++;
+        vaddr = mmuR2V(pm, pbuf);
+    }
+    if (vaddr & 2) {
+        *pbuf++ = *pa++;
+        vaddr = mmuR2V(pm, pbuf);
+        *pbuf++ = *pa++;
+        vaddr = mmuR2V(pm, pbuf);
+    }
 
     return vsp;
 }

@@ -94,7 +94,7 @@ int main(int argc, char *argv[]) {
         if (machine.aout.header[0] == 0x0108) {
             // 8KB alignment
             machine.dataStart = (machine.dataStart + 0x1fff) & ~0x1fff;
-            memmove(&machine.virtualMemory[machine.dataStart], &machine.virtualMemory[machine.textEnd], machine.aout.header[2]);
+            memmove(&machine.virtualMemory[machine.dataStart], &machine.virtualMemory[machine.textEnd], machine.sizeOfVM-machine.dataStart);
         }
         machine.dataEnd = machine.dataStart + machine.aout.header[2];
         machine.bssStart = machine.dataEnd;
