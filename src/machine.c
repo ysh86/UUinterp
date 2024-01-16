@@ -196,6 +196,8 @@ int load(machine_t *pm, const char *src) {
         pm->aout.headerBE[7] = ntohl(pm->aout.headerBE[7]);
     }
 
+    // TODO: validate aout before overwriting the virtual memory
+
     size = sizeof(pm->virtualMemory) - pm->textStart;
     n = fread(&pm->virtualMemory[pm->textStart], 1, size, fp);
     if (n <= 0) {
@@ -306,4 +308,12 @@ uint32_t pushArgs(machine_t *pm, uint32_t stackAddr) {
     }
 
     return vsp;
+}
+
+
+// for debug
+void coreDump(machine_t *pm, const char *path) {
+    FILE *fp = fopen(path, "wb");
+    fwrite(pm->virtualMemory, 1, sizeof(pm->virtualMemory), fp);
+    fclose(fp);
 }

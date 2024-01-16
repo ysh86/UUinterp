@@ -234,9 +234,7 @@ int main(int argc, char *argv[]) {
         // core dump
         char dumpPath[PATH_MAX];
         sprintf(dumpPath, "core%06d.bin", getpid());
-        FILE *fp = fopen(dumpPath, "wb");
-        fwrite(machine.virtualMemory, 1, machine.sizeOfVM, fp);
-        fclose(fp);
+        coreDump(&machine, dumpPath);
 
         // args
         const char *pa = (const char *)&machine.args[0];

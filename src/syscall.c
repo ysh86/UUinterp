@@ -907,6 +907,7 @@ void mysyscall16(machine_t *pm) {
         size_t exec_len = m.m1_i1;
         size_t stack_bytes = m.m1_i2;
         fprintf(stderr, "/ exec(\"%s\"(%ld), %08x[%ld])\n", exec_name, exec_len, mmuR2V(pm, stack_ptr), stack_bytes);
+        fprintf(stderr, "/ [DBG] reply vaddr: %08x\n", vraw+2);
         for (size_t i = 0; i < stack_bytes; i += 16) {
             fprintf(stderr, "/ [DBG] %08x:", mmuR2V(pm, stack_ptr+i));
             for (size_t j = 0; j < 16; ++j) {
@@ -932,7 +933,8 @@ void mysyscall16(machine_t *pm) {
 #endif
                 *pBE_reply_type = htons(-ret & 0xffff);
             } else {
-                *pBE_reply_type = 0;
+                // Do NOT reply if succeeded! (*pBE_reply_type = 0)
+                // It may cause damage to the aout that is loaded just now.
 
                 // goto the end of the memory, then run the new text
                 uint32_t isp = getISP(pm->cpu);

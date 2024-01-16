@@ -106,3 +106,7 @@ static inline void write32(uint8_t *p, uint32_t data) {
     p[2] = (data >> 8) & 0xff;
     p[3] = data & 0xff;
 }
+
+
+// for debug
+void coreDump(machine_t *pm, const char *path);
