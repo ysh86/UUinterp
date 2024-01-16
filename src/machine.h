@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <dirent.h>
 #include <arpa/inet.h>
+#include <assert.h>
 
 // for PATH_MAX
 #ifdef __linux__
@@ -45,7 +46,7 @@ struct machine_tag {
     } aout;
 
     // memory
-    uint8_t virtualMemory[64 * 1024];
+    uint8_t virtualMemory[4 * 64 * 1024];
     size_t sizeOfVM;
     uint32_t textStart;
     uint32_t textEnd;
@@ -75,12 +76,13 @@ uint32_t pushArgs(machine_t *pm, uint32_t stackAddr);
 
 // MMU
 static inline uint8_t *mmuV2R(machine_t *pm, uint32_t vaddr) {
-    //return (vaddr != 0) ? &pm->virtualMemory[vaddr & 0xffff] : NULL;
-    return &pm->virtualMemory[vaddr & 0xffff];
+    assert(vaddr <= sizeof(pm->virtualMemory));
+    return &pm->virtualMemory[vaddr];
 }
 static inline uint32_t mmuR2V(machine_t *pm, uint8_t *raddr) {
-    //return (raddr != NULL) ? (raddr - pm->virtualMemory) & 0xffff : 0;
-    return (raddr - pm->virtualMemory) & 0xffff;
+    ptrdiff_t vaddr = raddr - pm->virtualMemory;
+    assert(vaddr <= sizeof(pm->virtualMemory));
+    return vaddr;
 }
 
 // 16-bit LE

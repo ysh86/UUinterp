@@ -229,49 +229,65 @@ int main(int argc, char *argv[]) {
         (syscall_t)mysyscall16,
         (syscall_string_t)syscallString16,
         sp, machine.textStart);
-#if 0
+#if DEBUG_LOG
     {
-        // debug dump
-        FILE *fp = fopen("dump.bin", "wb");
+        // core dump
+        char dumpPath[PATH_MAX];
+        sprintf(dumpPath, "core%06d.bin", getpid());
+        FILE *fp = fopen(dumpPath, "wb");
         fwrite(machine.virtualMemory, 1, machine.sizeOfVM, fp);
         fclose(fp);
 
-        const uint32_t pc = getPC(&cpu);
-        const uint32_t sp = getSP(&cpu);
+        // args
+        const char *pa = (const char *)&machine.args[0];
+        fprintf(stderr, "/ argc: %d\n", machine.argc);
+        for (int i = 0; i < machine.argc; i++) {
+            fprintf(stderr, "/ argv[%d]: %s\n", i, pa);
+            pa += strlen(pa) + 1;
+        }
+        fprintf(stderr, "/ \n");
+        while (*pa == '\0') ++pa;
+        fprintf(stderr, "/ envc: %d\n", machine.envc);
+        for (int i = 0; i < machine.envc; i++) {
+            fprintf(stderr, "/ envp[%d]: %s\n", i, pa);
+            pa += strlen(pa) + 1;
+        }
+        fprintf(stderr, "/ \n");
 
-        printf("/ argc: %d\n", argc);
-        for (int i = 0; i < argc; i++) {
-            const char *pa = argv[i];
-            printf("/ argv[%d]: %s\n", i, pa);
-        }
-        printf("\n");
-        printf("/ pc: %08x\n", pc);
-        for (int j = 0; j < 256; j += 16) { // TODO: 関数化せよ
-            printf("/ %04x:", j);
+#if 0
+        const uint32_t pc = getPC(&cpu);
+        fprintf(stderr, "/ pc: %08x\n", pc);
+        for (int j = 0; j < 256; j += 16) {
+            fprintf(stderr, "/ %04x:", j);
             for (int i = 0; i < 16; i++) {
-                printf(" %02x", machine.virtualMemory[j + i]);
+                if (i == 8) fprintf(stderr, " ");
+                fprintf(stderr, " %02x", machine.virtualMemory[j + i]);
             }
-            printf("\n");
+            fprintf(stderr, "\n");
         }
-        printf("\n");
+        fprintf(stderr, "/ \n");
         for (int j = pc; j < pc+256; j += 16) {
-            printf("/ %04x:", j);
+            fprintf(stderr, "/ %04x:", j);
             for (int i = 0; i < 16; i++) {
-                printf(" %02x", machine.virtualMemory[j + i]);
+                if (i == 8) fprintf(stderr, " ");
+                fprintf(stderr, " %02x", machine.virtualMemory[j + i]);
             }
-            printf("\n");
+            fprintf(stderr, "\n");
         }
-        printf("\n");
-        printf("/ stack: sp = %08x\n", sp);
+        fprintf(stderr, "/ \n");
+#endif
+        const uint32_t sp = getSP(&cpu);
+        fprintf(stderr, "/ stack: sp = %08x\n", sp);
         int maxj = machine.sizeOfVM;
         for (int j = maxj - 256; j < maxj; j += 16) {
-            printf("/ %04x:", j);
+            fprintf(stderr, "/ %04x:", j);
             for (int i = 0; i < 16; i++) {
-                printf(" %02x", machine.virtualMemory[j + i]);
+                if (i == 8) fprintf(stderr, " ");
+                fprintf(stderr, " %02x", machine.virtualMemory[j + i]);
             }
-            printf("\n");
+            fprintf(stderr, "\n");
         }
-        printf("\n");
+        fprintf(stderr, "\n");
     }
 #endif
 
