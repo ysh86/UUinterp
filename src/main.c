@@ -175,8 +175,11 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "\n");
 #endif
 
-        // move relocate table
-        memmove(&machine.virtualMemory[machine.brk], &machine.virtualMemory[machine.bssStart], machine.sizeOfVM-machine.brk);
+        // skip symbol table and move relocate table
+        size_t relocSize = machine.sizeOfVM - (machine.bssStart + machine.aout.headerBE[7]);
+        size_t dstSize = machine.sizeOfVM - machine.brk;
+        relocSize = (dstSize < relocSize) ? dstSize : relocSize;
+        memmove(&machine.virtualMemory[machine.brk], &machine.virtualMemory[machine.bssStart + machine.aout.headerBE[7]], relocSize);
         // bss
         memset(&machine.virtualMemory[machine.bssStart], 0, machine.aout.headerBE[4]);
 
