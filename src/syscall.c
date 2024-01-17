@@ -907,6 +907,7 @@ void mysyscall16(machine_t *pm) {
         size_t exec_len = m.m1_i1;
         size_t stack_bytes = m.m1_i2;
         fprintf(stderr, "/ exec(\"%s\"(%ld), %08x[%ld])\n", exec_name, exec_len, mmuR2V(pm, stack_ptr), stack_bytes);
+        fprintf(stderr, "/ [DBG] reply vaddr: %08x\n", vraw+2);
         for (size_t i = 0; i < stack_bytes; i += 16) {
             fprintf(stderr, "/ [DBG] %08x:", mmuR2V(pm, stack_ptr+i));
             for (size_t j = 0; j < 16; ++j) {
@@ -932,13 +933,19 @@ void mysyscall16(machine_t *pm) {
 #endif
                 *pBE_reply_type = htons(-ret & 0xffff);
             } else {
-                *pBE_reply_type = 0;
+                // Do NOT reply if succeeded! (*pBE_reply_type = 0)
+                // It may cause damage to the aout that is loaded just now.
 
                 // goto the end of the memory, then run the new text
                 uint32_t isp = getISP(pm->cpu);
                 assert((isp & 1) == 0); // isp is word-aligned.
-                *(uint16_t *)(mmuV2R(pm, isp+2)) = 0xffff;
-                *(uint16_t *)(mmuV2R(pm, isp+4)) = 0xffff;
+                uint32_t eom = pm->sizeOfVM - 1;
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] new ppc: %08x\n", eom-2);
+                fprintf(stderr, "/ [DBG] new pc:  %08x\n", eom);
+#endif
+                *(uint16_t *)(mmuV2R(pm, isp+2)) = htons((eom >> 16) & 0xffff);
+                *(uint16_t *)(mmuV2R(pm, isp+4)) = htons(eom & 0xffff);
             }
         }
         break;
@@ -1275,7 +1282,9 @@ void mysyscall16(machine_t *pm) {
                 setC(pm->cpu); // error bit
             } else {
                 pm->cpu->r0 = 0;
-                pm->cpu->pc = 0xffff; // goto the end of the memory, then run the new text
+                // goto the end of the memory, then run the new text
+                uint32_t eom = pm->sizeOfVM - 1;
+                pm->cpu->pc = eom & 0xffff;
                 clearC(pm->cpu);
             }
         }

@@ -4,6 +4,9 @@
 #include <assert.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/types.h>
+
+#define DEBUG_LOG 0
 
 #include "machine.h"
 #ifdef UU_M68K_MINIX
@@ -55,6 +58,14 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
         }
     }
+    // return to cur dir
+    {
+        int ret = chdir(machine.curdir);
+        if (ret != 0) {
+            fprintf(stderr, "%s: %s\n", strerror(errno), machine.curdir);
+            return EXIT_FAILURE;
+        }
+    }
     argv++;
     argc--;
     // aout
@@ -62,8 +73,9 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "/ [ERR] Too big argv\n");
         return EXIT_FAILURE;
     }
-    if (load(&machine, (const char *)machine.args)) {
-        fprintf(stderr, "/ [ERR] Can't load file\n");
+    int ret;
+    if ((ret = load(&machine, (const char *)machine.args))) {
+        fprintf(stderr, "/ [ERR] Can't load file \"%s\": %s\n", (const char *)machine.args, strerror(ret));
         return EXIT_FAILURE;
     }
 
@@ -74,13 +86,15 @@ int main(int argc, char *argv[]) {
     reloaded:
     if (!IS_MAGIC_BE(machine.aout.headerBE[0])) {
         // PDP-11 V6
+        machine.sizeOfVM = (sizeof(machine.virtualMemory) < 0x10000) ? sizeof(machine.virtualMemory) : 0x10000;
+
         assert(machine.textStart == 0); // vectors not implemented
         machine.textEnd = machine.textStart + machine.aout.header[1];
         machine.dataStart = machine.textEnd;
         if (machine.aout.header[0] == 0x0108) {
             // 8KB alignment
             machine.dataStart = (machine.dataStart + 0x1fff) & ~0x1fff;
-            memmove(&machine.virtualMemory[machine.dataStart], &machine.virtualMemory[machine.textEnd], machine.aout.header[2]);
+            memmove(&machine.virtualMemory[machine.dataStart], &machine.virtualMemory[machine.textEnd], machine.sizeOfVM-machine.dataStart);
         }
         machine.dataEnd = machine.dataStart + machine.aout.header[2];
         machine.bssStart = machine.dataEnd;
@@ -89,20 +103,24 @@ int main(int argc, char *argv[]) {
 
         assert(machine.aout.header[0] == 0x0107 || machine.aout.header[0] == 0x0108);
         assert(machine.aout.header[1] > 0);
-        assert(machine.bssEnd <= 0xfffe);
+        assert(machine.bssEnd <= machine.sizeOfVM - 2);
         // TODO: validate other fields
 
-        printf("/ aout header (PDP-11 V6)\n");
-        printf("/\n");
-        printf("/ magic:     0x%04x\n", machine.aout.header[0]);
-        printf("/ text size: 0x%04x\n", machine.aout.header[1]);
-        printf("/ data size: 0x%04x\n", machine.aout.header[2]);
-        printf("/ bss  size: 0x%04x\n", machine.aout.header[3]);
-        printf("/ symbol:    0x%04x\n", machine.aout.header[4]);
-        printf("/ entry:     0x%04x\n", machine.aout.header[5]);
-        printf("/ unused:    0x%04x\n", machine.aout.header[6]);
-        printf("/ flag:      0x%04x\n", machine.aout.header[7]);
-        printf("\n");
+#if DEBUG_LOG
+        fprintf(stderr, "/ pid %d: ready\n", getpid());
+        fprintf(stderr, "/ load: %s (root: %s)\n", (const char *)machine.args, machine.rootdir);
+        fprintf(stderr, "/ aout header (PDP-11 V6)\n");
+        fprintf(stderr, "/\n");
+        fprintf(stderr, "/ magic:     0x%04x\n", machine.aout.header[0]);
+        fprintf(stderr, "/ text size: 0x%04x\n", machine.aout.header[1]);
+        fprintf(stderr, "/ data size: 0x%04x\n", machine.aout.header[2]);
+        fprintf(stderr, "/ bss  size: 0x%04x\n", machine.aout.header[3]);
+        fprintf(stderr, "/ symbol:    0x%04x\n", machine.aout.header[4]);
+        fprintf(stderr, "/ entry:     0x%04x\n", machine.aout.header[5]);
+        fprintf(stderr, "/ unused:    0x%04x\n", machine.aout.header[6]);
+        fprintf(stderr, "/ flag:      0x%04x\n", machine.aout.header[7]);
+        fprintf(stderr, "\n");
+#endif
 
         // bss
         memset(&machine.virtualMemory[machine.bssStart], 0, machine.aout.header[3]);
@@ -111,6 +129,8 @@ int main(int argc, char *argv[]) {
         sp = pushArgs16(&machine, 0);
     } else {
         // m68k Minix
+        machine.sizeOfVM = sizeof(machine.virtualMemory);
+
         if (machine.textStart != 0) {
             // clear vectors
             memset(&machine.virtualMemory[0], 0, machine.textStart);
@@ -130,41 +150,50 @@ int main(int argc, char *argv[]) {
 
         assert(machine.aout.headerBE[1] == 32);
         assert(machine.aout.headerBE[2] > 0);
-        assert(machine.bssEnd <= 0xfffe);
+        assert(machine.bssEnd <= machine.sizeOfVM - 2);
         assert((machine.brk & 1) == 0);
         // TODO: validate other fields
 
-        printf("/ aout header (m68k Minix)\n");
-        printf("/\n");
-        printf("/ magic:     0x%08x\n", ntohl(machine.aout.headerBE[0]));
-        printf("/ header len:0x%08x\n", machine.aout.headerBE[1]);
-        printf("/ text size: 0x%08x\n", machine.aout.headerBE[2]);
-        printf("/ data size: 0x%08x\n", machine.aout.headerBE[3]);
-        printf("/ bss  size: 0x%08x\n", machine.aout.headerBE[4]);
-        printf("/ entry:     0x%08x\n", machine.aout.headerBE[5]);
-        printf("/ total:     0x%08x\n", machine.aout.headerBE[6]);
-        printf("/ symbol:    0x%08x\n", machine.aout.headerBE[7]);
-        printf("/\n");
-        printf("/ text: 0x%08x-0x%08x\n", machine.textStart, machine.textEnd);
-        printf("/ data: 0x%08x-0x%08x\n", machine.dataStart, machine.dataEnd);
-        printf("/ bss : 0x%08x-0x%08x\n", machine.bssStart, machine.bssEnd);
-        printf("/ brk : 0x%08x-\n",       machine.brk);
-        printf("\n");
+#if DEBUG_LOG
+        fprintf(stderr, "/ pid %d: ready\n", getpid());
+        fprintf(stderr, "/ load: %s (root: %s)\n", (const char *)machine.args, machine.rootdir);
+        fprintf(stderr, "/ aout header (m68k Minix)\n");
+        fprintf(stderr, "/\n");
+        fprintf(stderr, "/ magic:     0x%08x\n", ntohl(machine.aout.headerBE[0]));
+        fprintf(stderr, "/ header len:0x%08x\n", machine.aout.headerBE[1]);
+        fprintf(stderr, "/ text size: 0x%08x\n", machine.aout.headerBE[2]);
+        fprintf(stderr, "/ data size: 0x%08x\n", machine.aout.headerBE[3]);
+        fprintf(stderr, "/ bss  size: 0x%08x\n", machine.aout.headerBE[4]);
+        fprintf(stderr, "/ entry:     0x%08x\n", machine.aout.headerBE[5]);
+        fprintf(stderr, "/ total:     0x%08x\n", machine.aout.headerBE[6]);
+        fprintf(stderr, "/ symbol:    0x%08x\n", machine.aout.headerBE[7]);
+        fprintf(stderr, "/\n");
+        fprintf(stderr, "/ text: 0x%08x-0x%08x\n", machine.textStart, machine.textEnd);
+        fprintf(stderr, "/ data: 0x%08x-0x%08x\n", machine.dataStart, machine.dataEnd);
+        fprintf(stderr, "/ bss : 0x%08x-0x%08x\n", machine.bssStart, machine.bssEnd);
+        fprintf(stderr, "/ brk : 0x%08x-\n",       machine.brk);
+        fprintf(stderr, "\n");
+#endif
 
+        // skip symbol table and move relocate table
+        size_t relocSize = machine.sizeOfVM - (machine.bssStart + machine.aout.headerBE[7]);
+        size_t dstSize = machine.sizeOfVM - machine.brk;
+        relocSize = (dstSize < relocSize) ? dstSize : relocSize;
+        memmove(&machine.virtualMemory[machine.brk], &machine.virtualMemory[machine.bssStart + machine.aout.headerBE[7]], relocSize);
         // bss
-        memmove(&machine.virtualMemory[machine.brk], &machine.virtualMemory[machine.bssStart], sizeof(machine.virtualMemory)-machine.brk);
         memset(&machine.virtualMemory[machine.bssStart], 0, machine.aout.headerBE[4]);
 
         // relocate
+        const int32_t entry = machine.aout.headerBE[5];
         const int32_t offset = machine.textStart;
         uint8_t *paddrs = &machine.virtualMemory[machine.brk];
         int32_t addr = ntohl(*(uint32_t *)paddrs);
         paddrs += 4;
-        if (offset != 0 && addr != 0) {
+        if (offset != entry && addr != 0) {
             addr += offset;
 
             while (1) {
-                assert(addr <= 0x0000fffe);
+                assert(addr <= machine.sizeOfVM - 4);
                 assert(addr < machine.dataEnd);
 
                 int32_t opland = ntohl(*(int32_t *)&machine.virtualMemory[addr]);
@@ -183,7 +212,7 @@ int main(int argc, char *argv[]) {
         }
 
         // stack
-        sp = pushArgs(&machine, sizeof(machine.virtualMemory));
+        sp = pushArgs(&machine, machine.sizeOfVM);
     }
 
     //////////////////////////
@@ -203,67 +232,86 @@ int main(int argc, char *argv[]) {
         (syscall_t)mysyscall16,
         (syscall_string_t)syscallString16,
         sp, machine.textStart);
-#if 0
+#if DEBUG_LOG
     {
-        // debug dump
-        FILE *fp = fopen("dump.bin", "wb");
-        fwrite(machine.virtualMemory, 1, sizeof(machine.virtualMemory), fp);
-        fclose(fp);
+        // core dump
+        char dumpPath[PATH_MAX];
+        sprintf(dumpPath, "core%06d.bin", getpid());
+        coreDump(&machine, dumpPath);
 
+        // args
+        const char *pa = (const char *)&machine.args[0];
+        fprintf(stderr, "/ argc: %d\n", machine.argc);
+        for (int i = 0; i < machine.argc; i++) {
+            fprintf(stderr, "/ argv[%d]: %s\n", i, pa);
+            pa += strlen(pa) + 1;
+        }
+        fprintf(stderr, "/ \n");
+        while (*pa == '\0') ++pa;
+        fprintf(stderr, "/ envc: %d\n", machine.envc);
+        for (int i = 0; i < machine.envc; i++) {
+            fprintf(stderr, "/ envp[%d]: %s\n", i, pa);
+            pa += strlen(pa) + 1;
+        }
+        fprintf(stderr, "/ \n");
+
+#if 0
         const uint32_t pc = getPC(&cpu);
-        const uint32_t sp = getSP(&cpu);
-
-        printf("/ argc: %d\n", argc);
-        for (int i = 0; i < argc; i++) {
-            const char *pa = argv[i];
-            printf("/ argv[%d]: %s\n", i, pa);
-        }
-        printf("\n");
-        printf("/ pc: %08x\n", pc);
-        for (int j = 0; j < 256; j += 16) { // TODO: 関数化せよ
-            printf("/ %04x:", j);
+        fprintf(stderr, "/ pc: %08x\n", pc);
+        for (int j = 0; j < 256; j += 16) {
+            fprintf(stderr, "/ %04x:", j);
             for (int i = 0; i < 16; i++) {
-                printf(" %02x", machine.virtualMemory[j + i]);
+                if (i == 8) fprintf(stderr, " ");
+                fprintf(stderr, " %02x", machine.virtualMemory[j + i]);
             }
-            printf("\n");
+            fprintf(stderr, "\n");
         }
-        printf("\n");
+        fprintf(stderr, "/ \n");
         for (int j = pc; j < pc+256; j += 16) {
-            printf("/ %04x:", j);
+            fprintf(stderr, "/ %04x:", j);
             for (int i = 0; i < 16; i++) {
-                printf(" %02x", machine.virtualMemory[j + i]);
+                if (i == 8) fprintf(stderr, " ");
+                fprintf(stderr, " %02x", machine.virtualMemory[j + i]);
             }
-            printf("\n");
+            fprintf(stderr, "\n");
         }
-        printf("\n");
-        printf("/ stack: sp = %08x\n", sp);
-        int maxj = sizeof(machine.virtualMemory);
+        fprintf(stderr, "/ \n");
+#endif
+        const uint32_t sp = getSP(&cpu);
+        fprintf(stderr, "/ stack: sp = %08x\n", sp);
+        int maxj = machine.sizeOfVM;
         for (int j = maxj - 256; j < maxj; j += 16) {
-            printf("/ %04x:", j);
+            fprintf(stderr, "/ %04x:", j);
             for (int i = 0; i < 16; i++) {
-                printf(" %02x", machine.virtualMemory[j + i]);
+                if (i == 8) fprintf(stderr, " ");
+                fprintf(stderr, " %02x", machine.virtualMemory[j + i]);
             }
-            printf("\n");
+            fprintf(stderr, "\n");
         }
-        printf("\n");
+        fprintf(stderr, "\n");
     }
 #endif
 
+    const uint32_t eom = machine.sizeOfVM - 1;
     while (1) {
         const uint32_t pc = getPC(&cpu);
         // TODO: debug
         //assert(pc < machine.textEnd);
-        if (pc >= 0xffff) {
+        if (pc >= eom) {
+#if DEBUG_LOG
+            fprintf(stderr, "/ pid %d: pc:%08x >= eom:%08x\n", getpid(), pc, eom);
+#endif
             break;
         }
 
         fetch(&cpu);
         decode(&cpu);
-        exec(&cpu);
-
 #if 0
+        fprintf(stderr, "/ pid %d: ", getpid());
         disasm(&cpu);
 #endif
+
+        exec(&cpu);
     }
     goto reloaded;
 
