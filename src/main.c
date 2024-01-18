@@ -230,7 +230,6 @@ int main(int argc, char *argv[]) {
         (mmu_v2r_t)mmuV2R,
         (mmu_r2v_t)mmuR2V,
         (syscall_t)mysyscall16,
-        (syscall_string_t)syscallString16,
         sp, machine.textStart);
 #if DEBUG_LOG
     {

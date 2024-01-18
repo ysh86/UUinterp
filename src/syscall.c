@@ -967,11 +967,6 @@ void mysyscall16(machine_t *pm) {
         break;
     }
 }
-void syscallString16(machine_t *pm, char *str, size_t size, uint8_t id) {
-    /*
-    fprintf(stderr, "/ syscall: src=%d, type=%d\n", m_source, m_type);
-    */
-}
 #else
 static void convstat16(uint8_t *pi, const struct stat* ps) {
     struct inode {
