@@ -1532,6 +1532,12 @@ void mysyscall16(machine_t *pm) {
         fprintf(stderr, "/ dup(%d)\n", (int16_t)pm->cpu->r0);
 #endif
         ret = dup((int16_t)pm->cpu->r0);
+#if MY_STRACE
+        if (ret == 2) {
+            fprintf(stderr, "/ dup(%d)\n", (int16_t)pm->cpu->r0);
+            fprintf(stderr, "/ [DBG] ret is stderr: %d\n", ret);
+        }
+#endif
         if (ret < 0) {
             pm->cpu->r0 = errno & 0xffff;
             setC(pm->cpu); // error bit
