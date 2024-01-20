@@ -1308,14 +1308,15 @@ void mysyscall16(machine_t *pm) {
         // exec
         word0 = fetch(pm->cpu);
         word1 = fetch(pm->cpu);
-        // debug
-        //fprintf(stderr, "/ [DBG] sys exec; %04x; %04x\n", word0, word1);
-        //fprintf(stderr, "/ [DBG]   %s\n", (const char *)&pm->virtualMemory[word0]);
-
+#if MY_STRACE
+        fprintf(stderr, "/ exec(\"%s\", %04x)\n",
+            (const char *)&pm->virtualMemory[word0],
+            word1);
+#endif
         // calc size of args & copy args
         ret = serializeArgvVirt16(pm, &pm->virtualMemory[word1]);
         if (ret < 0) {
-            //fprintf(stderr, "/ [ERR] Too big argv\n");
+            fprintf(stderr, "/ [ERR] Too big argv\n");
             pm->argc = 0;
             pm->argsbytes = 0;
             pm->cpu->r0 = 0xffff;
@@ -1323,12 +1324,18 @@ void mysyscall16(machine_t *pm) {
         } else {
             ret = load(pm, (const char *)&pm->virtualMemory[word0]);
             if (ret != 0) {
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] load(\"%s\"): %s\n", (const char *)&pm->virtualMemory[word0], strerror(ret));
+#endif
                 pm->cpu->r0 = 0xffff;
                 setC(pm->cpu); // error bit
             } else {
                 pm->cpu->r0 = 0;
                 // goto the end of the memory, then run the new text
                 uint16_t eom16 = (pm->sizeOfVM - 1) & 0xffff;
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] new pc:  %04x\n", eom16);
+#endif
                 pm->cpu->pc = eom16;
                 clearC(pm->cpu);
             }
