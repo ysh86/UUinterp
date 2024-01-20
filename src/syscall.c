@@ -323,7 +323,7 @@ void mysyscall16(machine_t *pm) {
         } else {
             *pBE_reply_type = htons(pid & 0xffff);
 #if MY_STRACE
-            fprintf(stderr, "/ [DBG] pid: %d (pc: %08x)\n", pid, getPC(pm->cpu));
+            fprintf(stderr, "/ [DBG] fork pid: %d (pc: %08x)\n", pid, getPC(pm->cpu));
 #endif
         }
         break;
@@ -362,7 +362,7 @@ void mysyscall16(machine_t *pm) {
                 // name
                 memcpy((char *)&p[2], ent->d_name, 16 - 2);
 #if MY_STRACE
-                fprintf(stderr, "/ [DBG] %s\n", ent->d_name);
+                fprintf(stderr, "/ [DBG] readdir: %016lx, %s\n", ent->d_ino, ent->d_name);
 #endif
                 sret += 16;
             }
@@ -659,6 +659,7 @@ void mysyscall16(machine_t *pm) {
                 uint8_t *pi = buf;
                 convstat(pi, &s);
 #if MY_STRACE
+                fprintf(stderr, "/ [DBG] inode=%016lx\n", s.st_ino);
                 fprintf(stderr, "/ [DBG] stat src: %06o\n", s.st_mode);
                 fprintf(stderr, "/ [DBG] stat dst: %06o\n", ntohs(*(uint16_t *)(pi + 4)));
 #endif
@@ -728,6 +729,7 @@ void mysyscall16(machine_t *pm) {
                 uint8_t *pi = buf;
                 convstat(pi, &s);
 #if MY_STRACE
+                fprintf(stderr, "/ [DBG] inode=%016lx\n", s.st_ino);
                 fprintf(stderr, "/ [DBG] fstat src: %06o\n", s.st_mode);
                 fprintf(stderr, "/ [DBG] fstat dst: %06o\n", ntohs(*(uint16_t *)(pi + 4)));
 #endif
@@ -962,15 +964,10 @@ void mysyscall16(machine_t *pm) {
         break;
     default:
         // TODO: not implemented
-        fprintf(stderr, "/ [ERR] Not implemented: sys %d, %08x\n", syscallID, vraw);
+        fprintf(stderr, "/ [ERR] Not implemented: syscall: %d (addr=%08x)\n", syscallID, vraw);
         assert(0);
         break;
     }
-}
-void syscallString16(machine_t *pm, char *str, size_t size, uint8_t id) {
-    /*
-    fprintf(stderr, "/ syscall: src=%d, type=%d\n", m_source, m_type);
-    */
 }
 #else
 static void convstat16(uint8_t *pi, const struct stat* ps) {
@@ -1040,8 +1037,13 @@ void mysyscall16(machine_t *pm) {
     char path1[PATH_MAX];
     ssize_t sret;
     int ret;
+    int e;
 
-    //fprintf(stderr, "/ [DBG] sys %d, %04x: %04x\n", pm->cpu->syscallID, pm->cpu->addr, pm->cpu->bin);
+#if MY_STRACE
+    if (pm->cpu->syscallID != 4 && pm->cpu->syscallID != 0) {
+        fprintf(stderr, "/ syscall: %d (addr=%04x, bin=%04x)\n", pm->cpu->syscallID, pm->cpu->addr, pm->cpu->bin);
+    }
+#endif
     switch (pm->cpu->syscallID) {
     case 0:
         // indir
@@ -1057,7 +1059,8 @@ void mysyscall16(machine_t *pm) {
         }
         // syscall exec(11) overwrites pc!
         if (pm->cpu->syscallID == 11) {
-            if (pm->cpu->pc != 0xffff) {
+            uint16_t eom16 = (pm->sizeOfVM - 1) & 0xffff;
+            if (pm->cpu->pc != eom16) {
                 pm->cpu->pc = oldpc;
                 assert(isC(pm->cpu));
             }
@@ -1069,10 +1072,16 @@ void mysyscall16(machine_t *pm) {
         break;
     case 1:
         // exit
+#if MY_STRACE
+        fprintf(stderr, "/ _exit(%d)\n", (int16_t)pm->cpu->r0);
+#endif
         _exit((int16_t)pm->cpu->r0);
         break;
     case 2:
         // fork
+#if MY_STRACE
+        fprintf(stderr, "/ fork()\n");
+#endif
         ret = fork();
         if (ret < 0) {
             pm->cpu->r0 = errno & 0xffff;
@@ -1085,7 +1094,9 @@ void mysyscall16(machine_t *pm) {
                 // parent
                 pm->cpu->pc += 2;
             }
-            //fprintf(stderr, "/ [DBG] fork pid: %d (pc: %04x)\n", ret, pm->cpu->pc);
+#if MY_STRACE
+            fprintf(stderr, "/ [DBG] fork pid: %d (pc: %04x)\n", ret, pm->cpu->pc);
+#endif
             pm->cpu->r0 = ret & 0xffff;
             clearC(pm->cpu);
         }
@@ -1094,6 +1105,9 @@ void mysyscall16(machine_t *pm) {
         // read
         word0 = fetch(pm->cpu);
         word1 = fetch(pm->cpu);
+#if MY_STRACE
+        fprintf(stderr, "/ read(%d, %04x, %d)\n", (int16_t)pm->cpu->r0, word0, word1);
+#endif
         if (pm->dirfd != -1 && pm->dirp != NULL && (int16_t)pm->cpu->r0 == pm->dirfd) {
             // dir
             struct dirent *ent;
@@ -1114,6 +1128,9 @@ void mysyscall16(machine_t *pm) {
                 p[1] = (ent->d_ino >> 8) & 0xff;
                 // name
                 memcpy((char *)&p[2], ent->d_name, 16 - 2);
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] readdir: %016lx, %s\n", ent->d_ino, ent->d_name);
+#endif
                 sret = word1;
             }
         } else {
@@ -1132,6 +1149,11 @@ void mysyscall16(machine_t *pm) {
         // write
         word0 = fetch(pm->cpu);
         word1 = fetch(pm->cpu);
+#if MY_STRACE
+        if ((int16_t)pm->cpu->r0 != STDOUT_FILENO && (int16_t)pm->cpu->r0 != STDERR_FILENO) {
+            fprintf(stderr, "/ write(%d, %04x, %d)\n", (int16_t)pm->cpu->r0, word0, word1);
+        }
+#endif
         sret = write((int16_t)pm->cpu->r0, &pm->virtualMemory[word0], word1);
         if (sret < 0) {
             pm->cpu->r0 = errno & 0xffff;
@@ -1146,10 +1168,12 @@ void mysyscall16(machine_t *pm) {
         word0 = fetch(pm->cpu);
         word1 = fetch(pm->cpu);
         addroot(path0, sizeof(path0), (const char *)&pm->virtualMemory[word0], pm->rootdir);
-        // debug
-        //fprintf(stderr, "/ [DBG] sys open; %04x; %06o\n", word0, word1);
-        //fprintf(stderr, "/   %s, %s\n", (const char *)&pm->virtualMemory[word0], pm->rootdir);
-        //fprintf(stderr, "/   %s\n", path0);
+#if MY_STRACE
+        fprintf(stderr, "/ open(\"%s\", %d) // full=%s\n",
+            (const char *)&pm->virtualMemory[word0],
+            word1,
+            path0);
+#endif
         ret = open(path0, word1);
         if (ret < 0) {
             pm->cpu->r0 = errno & 0xffff;
@@ -1181,6 +1205,9 @@ void mysyscall16(machine_t *pm) {
         break;
     case 6:
         // close
+#if MY_STRACE
+        fprintf(stderr, "/ close(%d)\n", (int16_t)pm->cpu->r0);
+#endif
         if (pm->dirfd != -1 && pm->dirp != NULL && (int16_t)pm->cpu->r0 == pm->dirfd) {
             // dir
             ret = closedir(pm->dirp);
@@ -1200,6 +1227,9 @@ void mysyscall16(machine_t *pm) {
         break;
     case 7:
         // wait
+#if MY_STRACE
+        fprintf(stderr, "/ wait(&status)\n");
+#endif
         {
             int status;
             ret = wait(&status);
@@ -1210,6 +1240,9 @@ void mysyscall16(machine_t *pm) {
                 pm->cpu->r0 = ret & 0xffff;
                 pm->cpu->r1 = status & 0xffff;
                 clearC(pm->cpu);
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] wait pid: %d status: %04x\n", ret, status);
+#endif
             }
         }
         break;
@@ -1218,10 +1251,12 @@ void mysyscall16(machine_t *pm) {
         word0 = fetch(pm->cpu);
         word1 = fetch(pm->cpu);
         addroot(path0, sizeof(path0), (const char *)&pm->virtualMemory[word0], pm->rootdir);
-        // debug
-        //fprintf(stderr, "/ [DBG] sys creat; %04x; %06o\n", word0, word1);
-        //fprintf(stderr, "/   %s, %s\n", (const char *)&pm->virtualMemory[word0], pm->rootdir);
-        //fprintf(stderr, "/   %s\n", path0);
+#if MY_STRACE
+        fprintf(stderr, "/ creat(\"%s\", %06o) // full=%s\n",
+            (const char *)&pm->virtualMemory[word0],
+            word1,
+            path0);
+#endif
         ret = creat(path0, word1);
         if (ret < 0) {
             pm->cpu->r0 = errno & 0xffff;
@@ -1237,6 +1272,13 @@ void mysyscall16(machine_t *pm) {
         word1 = fetch(pm->cpu);
         addroot(path0, sizeof(path0), (const char *)&pm->virtualMemory[word0], pm->rootdir);
         addroot(path1, sizeof(path1), (const char *)&pm->virtualMemory[word1], pm->rootdir);
+#if MY_STRACE
+        fprintf(stderr, "/ link(\"%s\", \"%s\") // full=%s, full2=%s\n",
+            (const char *)&pm->virtualMemory[word0],
+            (const char *)&pm->virtualMemory[word1],
+            path0,
+            path1);
+#endif
         ret = link(path0, path1);
         if (ret < 0) {
             pm->cpu->r0 = errno & 0xffff;
@@ -1250,6 +1292,11 @@ void mysyscall16(machine_t *pm) {
         // unlink
         word0 = fetch(pm->cpu);
         addroot(path0, sizeof(path0), (const char *)&pm->virtualMemory[word0], pm->rootdir);
+#if MY_STRACE
+        fprintf(stderr, "/ unlink(\"%s\") // full=%s\n",
+            (const char *)&pm->virtualMemory[word0],
+            path0);
+#endif
         ret = unlink(path0);
         if (ret < 0) {
             pm->cpu->r0 = errno & 0xffff;
@@ -1263,14 +1310,15 @@ void mysyscall16(machine_t *pm) {
         // exec
         word0 = fetch(pm->cpu);
         word1 = fetch(pm->cpu);
-        // debug
-        //fprintf(stderr, "/ [DBG] sys exec; %04x; %04x\n", word0, word1);
-        //fprintf(stderr, "/ [DBG]   %s\n", (const char *)&pm->virtualMemory[word0]);
-
+#if MY_STRACE
+        fprintf(stderr, "/ exec(\"%s\", %04x)\n",
+            (const char *)&pm->virtualMemory[word0],
+            word1);
+#endif
         // calc size of args & copy args
         ret = serializeArgvVirt16(pm, &pm->virtualMemory[word1]);
         if (ret < 0) {
-            //fprintf(stderr, "/ [ERR] Too big argv\n");
+            fprintf(stderr, "/ [ERR] Too big argv\n");
             pm->argc = 0;
             pm->argsbytes = 0;
             pm->cpu->r0 = 0xffff;
@@ -1278,13 +1326,19 @@ void mysyscall16(machine_t *pm) {
         } else {
             ret = load(pm, (const char *)&pm->virtualMemory[word0]);
             if (ret != 0) {
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] load(\"%s\"): %s\n", (const char *)&pm->virtualMemory[word0], strerror(ret));
+#endif
                 pm->cpu->r0 = 0xffff;
                 setC(pm->cpu); // error bit
             } else {
                 pm->cpu->r0 = 0;
                 // goto the end of the memory, then run the new text
-                uint32_t eom = pm->sizeOfVM - 1;
-                pm->cpu->pc = eom & 0xffff;
+                uint16_t eom16 = (pm->sizeOfVM - 1) & 0xffff;
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] new pc:  %04x\n", eom16);
+#endif
+                pm->cpu->pc = eom16;
                 clearC(pm->cpu);
             }
         }
@@ -1292,8 +1346,27 @@ void mysyscall16(machine_t *pm) {
     case 12:
         // chdir
         word0 = fetch(pm->cpu);
-        addroot(path0, sizeof(path0), (const char *)&pm->virtualMemory[word0], pm->rootdir);
-        ret = chdir(path0);
+        const char *name = (const char *)&pm->virtualMemory[word0];
+#if MY_STRACE
+        fprintf(stderr, "/ chdir(\"%s\")\n", name);
+#endif
+        if (name[0] == '.' && name[1] == '.' && name[2] == '\0') {
+            // TODO: support
+            //  '../foo'
+            //  './..'
+            //  'foo/bar/../../..'
+            char *p = getcwd(path0, sizeof(path0));
+            if (p != NULL && strcmp(path0, pm->rootdir) == 0) {
+                // do nothing
+                pm->cpu->r0 = 0;
+                clearC(pm->cpu);
+                break;
+            }
+            ret = chdir("..");
+        } else {
+            addroot(path0, sizeof(path0), name, pm->rootdir);
+            ret = chdir(path0);
+        }
         if (ret < 0) {
             pm->cpu->r0 = errno & 0xffff;
             setC(pm->cpu); // error bit
@@ -1304,6 +1377,9 @@ void mysyscall16(machine_t *pm) {
         break;
     case 13:
         // time
+#if MY_STRACE
+        fprintf(stderr, "/ time()\n");
+#endif
         {
             time_t t = time(NULL);
             pm->cpu->r0 = (t >> 16) & 0xffff;
@@ -1315,6 +1391,12 @@ void mysyscall16(machine_t *pm) {
         word0 = fetch(pm->cpu);
         word1 = fetch(pm->cpu);
         addroot(path0, sizeof(path0), (const char *)&pm->virtualMemory[word0], pm->rootdir);
+#if MY_STRACE
+        fprintf(stderr, "/ chmod(\"%s\", %06o) // full=%s\n",
+            (const char *)&pm->virtualMemory[word0],
+            word1,
+            path0);
+#endif
         ret = chmod(path0, word1);
         if (ret < 0) {
             pm->cpu->r0 = errno & 0xffff;
@@ -1327,13 +1409,19 @@ void mysyscall16(machine_t *pm) {
     case 17:
         // break
         word0 = fetch(pm->cpu);
-        addr = (word0 + 63) & ~63;
-        if (addr < pm->bssEnd || pm->cpu->sp < addr) {
+        uint16_t addr64 = (word0 + 63) & ~63;
+#if MY_STRACE
+        fprintf(stderr, "/ break(%04x)\n", word0);
+        fprintf(stderr, "/   bssEnd: %04x\n", pm->bssEnd);
+        fprintf(stderr, "/   brk:    %04x -> %04x\n", pm->brk, addr64);
+        fprintf(stderr, "/   SP:     %04x\n", pm->cpu->sp);
+#endif
+        if (addr64 < pm->bssEnd || pm->cpu->sp < addr64) {
             pm->cpu->r0 = 0xffff;
             setC(pm->cpu); // error bit
         } else {
             pm->cpu->r0 = pm->brk;
-            pm->brk = addr;
+            pm->brk = addr64;
             clearC(pm->cpu);
         }
         break;
@@ -1343,6 +1431,12 @@ void mysyscall16(machine_t *pm) {
         word1 = fetch(pm->cpu);
         {
             addroot(path0, sizeof(path0), (const char *)&pm->virtualMemory[word0], pm->rootdir);
+#if MY_STRACE
+            fprintf(stderr, "/ stat(\"%s\", %04x) // full=%s\n",
+                (const char *)&pm->virtualMemory[word0],
+                word1,
+                path0);
+#endif
 
             struct stat s;
             ret = stat(path0, &s);
@@ -1354,9 +1448,11 @@ void mysyscall16(machine_t *pm) {
                 clearC(pm->cpu);
                 uint8_t *pi = &pm->virtualMemory[word1];
                 convstat16(pi, &s);
-                // debug
-                //fprintf(stderr, "/ [DBG] stat src: %06o\n", s.st_mode);
-                //fprintf(stderr, "/ [DBG] stat dst: %06o\n", *(uint16_t *)(pi + 4));
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] inode=%016lx\n", s.st_ino);
+                fprintf(stderr, "/ [DBG] stat src: %06o\n", s.st_mode);
+                fprintf(stderr, "/ [DBG] stat dst: %06o\n", *(uint16_t *)(pi + 4));
+#endif
             }
         }
         break;
@@ -1374,6 +1470,10 @@ void mysyscall16(machine_t *pm) {
             offset *= 512;
             word1 -= 3;
         }
+#if MY_STRACE
+        fprintf(stderr, "/ lseek(%d, %ld, %d)\n", (int16_t)pm->cpu->r0, offset, word1);
+#endif
+        // TODO: seekdir
         offset = lseek((int16_t)pm->cpu->r0, offset, word1);
         if (offset < 0) {
             pm->cpu->r0 = errno & 0xffff;
@@ -1385,11 +1485,14 @@ void mysyscall16(machine_t *pm) {
         break;
     case 20:
         // getpid
+#if MY_STRACE
+        fprintf(stderr, "/ getpid()\n");
+#endif
         pm->cpu->r0 = getpid() & 0xffff;
         break;
     case 23:
         // setuid
-        fprintf(stderr, "/ [WRN] ignore setuid: sys %d, %04x: %04x\n", pm->cpu->syscallID, pm->cpu->addr, pm->cpu->bin);
+        fprintf(stderr, "/ [WRN] ignore setuid(), (addr=%04x, bin=%04x)\n", pm->cpu->addr, pm->cpu->bin);
         {
             pm->cpu->r0 = 0;
             clearC(pm->cpu);
@@ -1397,11 +1500,17 @@ void mysyscall16(machine_t *pm) {
         break;
     case 24:
         // getuid
+#if MY_STRACE
+        fprintf(stderr, "/ getuid(),geteuid()\n");
+#endif
         pm->cpu->r0 = ((geteuid() & 0xff) << 8) | (getuid() & 0xff);
         break;
     case 28:
         // fstat
         word0 = fetch(pm->cpu);
+#if MY_STRACE
+        fprintf(stderr, "/ fstat(%d, %04x)\n", (int16_t)pm->cpu->r0, word0);
+#endif
         {
             struct stat s;
             ret = fstat((int16_t)pm->cpu->r0, &s);
@@ -1413,15 +1522,26 @@ void mysyscall16(machine_t *pm) {
                 clearC(pm->cpu);
                 uint8_t *pi = &pm->virtualMemory[word0];
                 convstat16(pi, &s);
-                // debug
-                //fprintf(stderr, "/ [DBG] fstat src: %06o\n", s.st_mode);
-                //fprintf(stderr, "/ [DBG] fstat dst: %06o\n", *(uint16_t *)(pi + 4));
+#if MY_STRACE
+                fprintf(stderr, "/ [DBG] inode=%016lx\n", s.st_ino);
+                fprintf(stderr, "/ [DBG] fstat src: %06o\n", s.st_mode);
+                fprintf(stderr, "/ [DBG] fstat dst: %06o\n", *(uint16_t *)(pi + 4));
+#endif
             }
         }
         break;
     case 41:
         // dup
+#if MY_STRACE
+        fprintf(stderr, "/ dup(%d)\n", (int16_t)pm->cpu->r0);
+#endif
         ret = dup((int16_t)pm->cpu->r0);
+#if MY_STRACE
+        if (ret == 2) {
+            fprintf(stderr, "/ dup(%d)\n", (int16_t)pm->cpu->r0);
+            fprintf(stderr, "/ [DBG] ret is stderr: %d\n", ret);
+        }
+#endif
         if (ret < 0) {
             pm->cpu->r0 = errno & 0xffff;
             setC(pm->cpu); // error bit
@@ -1433,10 +1553,17 @@ void mysyscall16(machine_t *pm) {
     case 42:
         // pipe
         {
+#if MY_STRACE
+            fprintf(stderr, "/ pipe()\n");
+#endif
             int pipefd[2];
             ret = pipe(pipefd);
+            e = errno;
+#if MY_STRACE
+            fprintf(stderr, "/ [DBG] ret=%d, fd0=%d, fd1=%d\n", ret, pipefd[0], pipefd[1]);
+#endif
             if (ret < 0) {
-                pm->cpu->r0 = errno & 0xffff;
+                pm->cpu->r0 = e & 0xffff;
                 setC(pm->cpu); // error bit
             } else {
                 pm->cpu->r0 = pipefd[0] & 0xffff;
@@ -1448,6 +1575,9 @@ void mysyscall16(machine_t *pm) {
     case 43:
         // times
         word0 = fetch(pm->cpu);
+#if MY_STRACE
+        fprintf(stderr, "/ times(%04x)\n", word0);
+#endif
         /* in 1/60 seconds
         struct tbuffer {
             int16_t proc_user_time;
@@ -1479,7 +1609,7 @@ void mysyscall16(machine_t *pm) {
         break;
     case 46:
         // setgid
-        fprintf(stderr, "/ [WRN] ignore setgid: sys %d, %04x: %04x\n", pm->cpu->syscallID, pm->cpu->addr, pm->cpu->bin);
+        fprintf(stderr, "/ [WRN] ignore setgid(), (addr=%04x, bin=%04x)\n", pm->cpu->addr, pm->cpu->bin);
         {
             pm->cpu->r0 = 0;
             clearC(pm->cpu);
@@ -1487,13 +1617,16 @@ void mysyscall16(machine_t *pm) {
         break;
     case 47:
         // getgid
+#if MY_STRACE
+        fprintf(stderr, "/ getgid(),getegid()\n");
+#endif
         pm->cpu->r0 = ((getegid() & 0xff) << 8) | (getgid() & 0xff);
         break;
     case 48:
         // signal
         word0 = fetch(pm->cpu);
         word1 = fetch(pm->cpu);
-        fprintf(stderr, "/ [WRN] ignore signal: sys %d; %d; 0x%04x, %04x: %04x\n", pm->cpu->syscallID, word0, word1, pm->cpu->addr, pm->cpu->bin);
+        fprintf(stderr, "/ [WRN] ignore signal(%d, %04x), (addr=%04x, bin=%04x)\n", word0, word1, pm->cpu->addr, pm->cpu->bin);
         {
             pm->cpu->r0 = 0; // terminate
             clearC(pm->cpu);
@@ -1501,159 +1634,11 @@ void mysyscall16(machine_t *pm) {
         break;
     default:
         // TODO: not implemented
-        fprintf(stderr, "/ [ERR] Not implemented: sys %d, %04x: %04x\n", pm->cpu->syscallID, pm->cpu->addr, pm->cpu->bin);
+        fprintf(stderr, "/ [ERR] Not implemented: syscall: %d (addr=%04x, bin=%04x)\n", pm->cpu->syscallID, pm->cpu->addr, pm->cpu->bin);
         assert(0);
         break;
     }
 }
 
-void syscallString16(machine_t *pm, char *str, size_t size, uint8_t id) {
-    uint16_t word0 = 0;
-    uint16_t word1 = 0;
-    switch (id) {
-    case 0:
-        // indir
-        word0 = fetch(pm->cpu);
-        snprintf(str, size, "0; 0x%04x", word0);
-        break;
-    case 1:
-        // exit
-        snprintf(str, size, "exit");
-        break;
-    case 2:
-        // fork
-        snprintf(str, size, "fork");
-        break;
-    case 3:
-        // read
-        word0 = fetch(pm->cpu);
-        word1 = fetch(pm->cpu);
-        snprintf(str, size, "read; 0x%04x; 0x%04x", word0, word1);
-        break;
-    case 4:
-        // write
-        word0 = fetch(pm->cpu);
-        word1 = fetch(pm->cpu);
-        snprintf(str, size, "write; 0x%04x; 0x%04x", word0, word1);
-        break;
-    case 5:
-        // open
-        word0 = fetch(pm->cpu);
-        word1 = fetch(pm->cpu);
-        snprintf(str, size, "open; 0x%04x; 0x%04x", word0, word1);
-        break;
-    case 6:
-        // close
-        snprintf(str, size, "close");
-        break;
-    case 7:
-        // wait
-        snprintf(str, size, "wait");
-        break;
-    case 8:
-        // creat
-        word0 = fetch(pm->cpu);
-        word1 = fetch(pm->cpu);
-        snprintf(str, size, "creat; 0x%04x; 0x%04x", word0, word1);
-        break;
-    case 9:
-        // link
-        word0 = fetch(pm->cpu);
-        word1 = fetch(pm->cpu);
-        snprintf(str, size, "link; 0x%04x; 0x%04x", word0, word1);
-        break;
-    case 10:
-        // unlink
-        word0 = fetch(pm->cpu);
-        snprintf(str, size, "unlink; 0x%04x", word0);
-        break;
-    case 11:
-        // exec
-        word0 = fetch(pm->cpu);
-        word1 = fetch(pm->cpu);
-        snprintf(str, size, "exec; 0x%04x; 0x%04x", word0, word1);
-        break;
-    case 12:
-        // chdir
-        word0 = fetch(pm->cpu);
-        snprintf(str, size, "chdir; 0x%04x", word0);
-        break;
-    case 13:
-        // time
-        snprintf(str, size, "time");
-        break;
-    case 15:
-        // chmod
-        word0 = fetch(pm->cpu);
-        word1 = fetch(pm->cpu);
-        snprintf(str, size, "chmod; 0x%04x; 0x%04x", word0, word1);
-        break;
-    case 17:
-        // break
-        word0 = fetch(pm->cpu);
-        snprintf(str, size, "break; 0x%04x", word0);
-        break;
-    case 18:
-        // stat
-        word0 = fetch(pm->cpu);
-        word1 = fetch(pm->cpu);
-        snprintf(str, size, "stat; 0x%04x; 0x%04x", word0, word1);
-        break;
-    case 19:
-        // seek
-        word0 = fetch(pm->cpu);
-        word1 = fetch(pm->cpu);
-        snprintf(str, size, "seek; 0x%04x; 0x%04x", word0, word1);
-        break;
-    case 20:
-        // getpid
-        snprintf(str, size, "getpid");
-        break;
-    case 23:
-        // setuid
-        snprintf(str, size, "setuid");
-        break;
-    case 24:
-        // getuid
-        snprintf(str, size, "getuid");
-        break;
-    case 28:
-        // fstat
-        word0 = fetch(pm->cpu);
-        snprintf(str, size, "fstat; 0x%04x", word0);
-        break;
-    case 41:
-        // dup
-        snprintf(str, size, "dup");
-        break;
-    case 42:
-        // pipe
-        snprintf(str, size, "pipe");
-        break;
-    case 43:
-        // times
-        word0 = fetch(pm->cpu);
-        snprintf(str, size, "times; 0x%04x", word0);
-        break;
-    case 46:
-        // setgid
-        snprintf(str, size, "setgid");
-        break;
-    case 47:
-        // getgid
-        snprintf(str, size, "getgid");
-        break;
-    case 48:
-        // signal
-        word0 = fetch(pm->cpu);
-        word1 = fetch(pm->cpu);
-        snprintf(str, size, "sig; 0x%04x; 0x%04x", word0, word1);
-        break;
-    default:
-        // TODO: not implemented
-        fprintf(stderr, "/ [ERR] Not implemented, %04x: %04x, sys %d\n", pm->cpu->addr, pm->cpu->bin, id);
-        assert(0);
-        break;
-    }
-}
+void syscallString16(machine_t *pm, char *str, size_t size, uint8_t id) {}
 #endif
