@@ -233,10 +233,12 @@ int main(int argc, char *argv[]) {
         sp, machine.textStart);
 #if DEBUG_LOG
     {
+#if 0
         // core dump
         char dumpPath[PATH_MAX];
         sprintf(dumpPath, "core%06d.bin", getpid());
         coreDump(&machine, dumpPath);
+#endif
 
         // args
         const char *pa = (const char *)&machine.args[0];
