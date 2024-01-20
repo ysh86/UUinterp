@@ -362,7 +362,7 @@ void mysyscall16(machine_t *pm) {
                 // name
                 memcpy((char *)&p[2], ent->d_name, 16 - 2);
 #if MY_STRACE
-                fprintf(stderr, "/ [DBG] %s\n", ent->d_name);
+                fprintf(stderr, "/ [DBG] readdir: %016lx, %s\n", ent->d_ino, ent->d_name);
 #endif
                 sret += 16;
             }
@@ -659,6 +659,7 @@ void mysyscall16(machine_t *pm) {
                 uint8_t *pi = buf;
                 convstat(pi, &s);
 #if MY_STRACE
+                fprintf(stderr, "/ [DBG] inode=%016lx\n", s.st_ino);
                 fprintf(stderr, "/ [DBG] stat src: %06o\n", s.st_mode);
                 fprintf(stderr, "/ [DBG] stat dst: %06o\n", ntohs(*(uint16_t *)(pi + 4)));
 #endif
@@ -728,6 +729,7 @@ void mysyscall16(machine_t *pm) {
                 uint8_t *pi = buf;
                 convstat(pi, &s);
 #if MY_STRACE
+                fprintf(stderr, "/ [DBG] inode=%016lx\n", s.st_ino);
                 fprintf(stderr, "/ [DBG] fstat src: %06o\n", s.st_mode);
                 fprintf(stderr, "/ [DBG] fstat dst: %06o\n", ntohs(*(uint16_t *)(pi + 4)));
 #endif
@@ -1127,7 +1129,7 @@ void mysyscall16(machine_t *pm) {
                 // name
                 memcpy((char *)&p[2], ent->d_name, 16 - 2);
 #if MY_STRACE
-                fprintf(stderr, "/ [DBG] %s\n", ent->d_name);
+                fprintf(stderr, "/ [DBG] readdir: %016lx, %s\n", ent->d_ino, ent->d_name);
 #endif
                 sret = word1;
             }
@@ -1447,6 +1449,7 @@ void mysyscall16(machine_t *pm) {
                 uint8_t *pi = &pm->virtualMemory[word1];
                 convstat16(pi, &s);
 #if MY_STRACE
+                fprintf(stderr, "/ [DBG] inode=%016lx\n", s.st_ino);
                 fprintf(stderr, "/ [DBG] stat src: %06o\n", s.st_mode);
                 fprintf(stderr, "/ [DBG] stat dst: %06o\n", *(uint16_t *)(pi + 4));
 #endif
@@ -1520,6 +1523,7 @@ void mysyscall16(machine_t *pm) {
                 uint8_t *pi = &pm->virtualMemory[word0];
                 convstat16(pi, &s);
 #if MY_STRACE
+                fprintf(stderr, "/ [DBG] inode=%016lx\n", s.st_ino);
                 fprintf(stderr, "/ [DBG] fstat src: %06o\n", s.st_mode);
                 fprintf(stderr, "/ [DBG] fstat dst: %06o\n", *(uint16_t *)(pi + 4));
 #endif
