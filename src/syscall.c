@@ -268,7 +268,7 @@ void mysyscall16(machine_t *pm) {
     uint8_t *buf;
     size_t nbytes;
     int flags;
-    pid_t pid; // TODO: support 32-bit or warning over 16-bit
+    pid_t pid; // TODO: support 32-bit
     int sig;
     ssize_t sret;
     int ret;
@@ -321,9 +321,9 @@ void mysyscall16(machine_t *pm) {
         if (pid < 0) {
             *pBE_reply_type = htons(-errno & 0xffff);
         } else {
-            *pBE_reply_type = htons(pid & 0xffff);
+            *pBE_reply_type = htons(pid & 0x7fff); // valid 15-bit only
 #if MY_STRACE
-            fprintf(stderr, "/ [DBG] fork pid: %d (pc: %08x)\n", pid, getPC(pm->cpu));
+            fprintf(stderr, "/ [DBG] fork pid: %5d pid15: %5d (pc: %08x)\n", pid, pid&0x7fff, getPC(pm->cpu));
 #endif
         }
         break;
@@ -476,10 +476,10 @@ void mysyscall16(machine_t *pm) {
         if (pid < 0) {
             *pBE_reply_type = htons(-errno & 0xffff);
         } else {
-            *pBE_reply_type = htons(pid & 0xffff);
+            *pBE_reply_type = htons(pid & 0x7fff); // valid 15-bit only
             *pBE_reply_i1 = htons(wstatus & 0xffff);
 #if MY_STRACE
-            fprintf(stderr, "/ [DBG] wait pid: %d status: %04x\n", pid, wstatus);
+            fprintf(stderr, "/ [DBG] wait pid: %d pid15: %d status: %04x\n", pid, pid&0x7fff, wstatus);
 #endif
         }
         break;
@@ -697,7 +697,7 @@ void mysyscall16(machine_t *pm) {
         fprintf(stderr, "/ getpid()\n");
 #endif
         pid = getpid();
-        *pBE_reply_type = htons(pid & 0xffff);
+        *pBE_reply_type = htons(pid & 0x7fff); // valid 15-bit only
         break;
     case 24:
         // getuid
@@ -1095,7 +1095,7 @@ void mysyscall16(machine_t *pm) {
                 pm->cpu->pc += 2;
             }
 #if MY_STRACE
-            fprintf(stderr, "/ [DBG] fork pid: %d (pc: %04x)\n", ret, pm->cpu->pc);
+            fprintf(stderr, "/ [DBG] fork pid: %5d (pc: %04x)\n", ret, pm->cpu->pc);
 #endif
             pm->cpu->r0 = ret & 0xffff;
             clearC(pm->cpu);
