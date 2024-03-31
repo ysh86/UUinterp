@@ -46,7 +46,7 @@ struct machine_tag {
     } aout;
 
     // memory
-    uint8_t virtualMemory[4 * 64 * 1024];
+    uint8_t virtualMemory[1024 * 1024];
     size_t sizeOfVM;
     uint32_t textStart;
     uint32_t textEnd;

@@ -187,16 +187,19 @@ int load(machine_t *pm, const char *src) {
             return ENOEXEC;
         }
 
-        pm->aout.headerBE[1] = ntohl(pm->aout.headerBE[1]) & 0xff;
-        pm->aout.headerBE[2] = ntohl(pm->aout.headerBE[2]);
-        pm->aout.headerBE[3] = ntohl(pm->aout.headerBE[3]);
-        pm->aout.headerBE[4] = ntohl(pm->aout.headerBE[4]);
-        pm->aout.headerBE[5] = ntohl(pm->aout.headerBE[5]);
-        pm->aout.headerBE[6] = ntohl(pm->aout.headerBE[6]);
-        pm->aout.headerBE[7] = ntohl(pm->aout.headerBE[7]);
+        pm->aout.headerBE[1] = ntohl(pm->aout.headerBE[1]) & 0xff; // header len
+        pm->aout.headerBE[2] = ntohl(pm->aout.headerBE[2]); // text size
+        pm->aout.headerBE[3] = ntohl(pm->aout.headerBE[3]); // data size
+        pm->aout.headerBE[4] = ntohl(pm->aout.headerBE[4]); // bss  size
+        pm->aout.headerBE[5] = ntohl(pm->aout.headerBE[5]); // entry
+        pm->aout.headerBE[6] = ntohl(pm->aout.headerBE[6]); // total
+        pm->aout.headerBE[7] = ntohl(pm->aout.headerBE[7]); // symbol
     }
 
     // TODO: validate aout before overwriting the virtual memory
+    if (sizeof(pm->virtualMemory) < pm->aout.headerBE[6]) {
+        return ENOMEM;
+    }
 
     size = sizeof(pm->virtualMemory) - pm->textStart;
     n = fread(&pm->virtualMemory[pm->textStart], 1, size, fp);
