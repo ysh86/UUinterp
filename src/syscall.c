@@ -13,6 +13,7 @@
 #include <sys/wait.h>
 #include <sys/times.h>
 #include <signal.h>
+#include <utime.h>
 
 #include "syscall.h"
 #include "machine.h"
@@ -333,7 +334,7 @@ void mysyscall16(machine_t *pm) {
         setM1(&m, vraw, pm);
         fd = m.m1_i1;
         buf = m.m1_p1;
-        nbytes = m.m1_i2;
+        nbytes = m.m1_i2 | (m.m1_i3 << 16);
 #if MY_STRACE
         fprintf(stderr, "/ read(%d, %08x, %ld)\n", fd, mmuR2V(pm, buf), nbytes);
 #endif
@@ -382,7 +383,7 @@ void mysyscall16(machine_t *pm) {
         setM1(&m, vraw, pm);
         fd = m.m1_i1;
         buf = m.m1_p1;
-        nbytes = m.m1_i2;
+        nbytes = m.m1_i2 | (m.m1_i3 << 16);
 #if MY_STRACE
         if (fd != STDOUT_FILENO && fd != STDERR_FILENO) {
             fprintf(stderr, "/ write(%d, %08x, %ld)\n", fd, mmuR2V(pm, buf), nbytes);
@@ -734,6 +735,27 @@ void mysyscall16(machine_t *pm) {
                 fprintf(stderr, "/ [DBG] fstat dst: %06o\n", ntohs(*(uint16_t *)(pi + 4)));
 #endif
             }
+        }
+        break;
+    case 30:
+        // utime
+        assert(mmfs == FS);
+        setM2(&m, vraw, pm);
+        //size_t len = m.m2_i1;
+        struct utimbuf utimes = {
+            m.m2_l1,
+            m.m2_l2
+        };
+        name = (const char *)m.m2_p1;
+        addroot(path0, sizeof(path0), name, pm->rootdir);
+#if MY_STRACE
+        fprintf(stderr, "/ utime(\"%s\", {%ld, %ld}) // name len=%d, full=%s\n", name, utimes.actime, utimes.modtime, m.m2_i1, path0);
+#endif
+        ret = utime(path0, &utimes);
+        if (ret < 0) {
+            *pBE_reply_type = htons(-errno & 0xffff);
+        } else {
+            *pBE_reply_type = htons(ret & 0xffff);
         }
         break;
     case 33:

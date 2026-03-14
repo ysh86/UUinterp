@@ -307,9 +307,11 @@ int main(int argc, char *argv[]) {
 
         fetch(&cpu);
         decode(&cpu);
+#if DEBUG_LOG
 #if 0
         fprintf(stderr, "/ pid %d: ", getpid());
         disasm(&cpu);
+#endif
 #endif
 
         exec(&cpu);
