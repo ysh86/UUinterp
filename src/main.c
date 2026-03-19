@@ -227,6 +227,11 @@ int main(int argc, char *argv[]) {
     init(
         &cpu,
         &machine,
+#if DEBUG_LOG
+        (mmu_v2r_t)mmuIsWritable,
+#else
+        NULL,
+#endif
         (mmu_v2r_t)mmuV2R,
         (mmu_r2v_t)mmuR2V,
         (syscall_t)mysyscall16,
