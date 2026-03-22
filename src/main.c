@@ -227,6 +227,11 @@ int main(int argc, char *argv[]) {
     init(
         &cpu,
         &machine,
+#if DEBUG_LOG
+        (mmu_v2r_t)mmuIsWritable,
+#else
+        NULL,
+#endif
         (mmu_v2r_t)mmuV2R,
         (mmu_r2v_t)mmuR2V,
         (syscall_t)mysyscall16,
@@ -307,9 +312,11 @@ int main(int argc, char *argv[]) {
 
         fetch(&cpu);
         decode(&cpu);
+#if DEBUG_LOG
 #if 0
         fprintf(stderr, "/ pid %d: ", getpid());
         disasm(&cpu);
+#endif
 #endif
 
         exec(&cpu);

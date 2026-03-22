@@ -79,6 +79,13 @@ static inline uint8_t *mmuV2R(machine_t *pm, uint32_t vaddr) {
     assert(vaddr <= sizeof(pm->virtualMemory));
     return &pm->virtualMemory[vaddr];
 }
+static inline uint8_t *mmuIsWritable(machine_t *pm, uint32_t vaddr) {
+    assert(vaddr <= sizeof(pm->virtualMemory));
+    if (vaddr < pm->textStart || pm->textEnd <= vaddr) {
+        return mmuV2R(pm, vaddr);
+    }
+    return NULL;
+}
 static inline uint32_t mmuR2V(machine_t *pm, uint8_t *raddr) {
     ptrdiff_t vaddr = raddr - pm->virtualMemory;
     assert(vaddr <= sizeof(pm->virtualMemory));
