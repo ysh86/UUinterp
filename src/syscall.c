@@ -76,10 +76,11 @@ static void convstat(uint8_t *pi, const struct stat* ps) {
     pi[29] = ps->st_ctime & 0xff;
 }
 
-#define M1                 1
-#define M3                 3
-#define M4                 4
-#define M3_STRING         14
+#define M1        1
+#define M3        3
+#define M4        4
+#define M3_STRING 14
+#define MESS_SIZE (sizeof(m.m_source)+sizeof(m.m_type)+sizeof(m.m3_i1)+sizeof(m.m3_i2)+4+M3_STRING)
 
 typedef struct {uint16_t m1i1, m1i2, m1i3; uint8_t *m1p1, *m1p2, *m1p3;} mess_1;
 typedef struct {uint16_t m2i1, m2i2, m2i3; uint32_t m2l1, m2l2; uint8_t *m2p1;} mess_2;
@@ -494,6 +495,12 @@ void mysyscall16(machine_t *pm) {
         //name = (const char *)&m.m3_ca1[0]; // short only
         addroot(path0, sizeof(path0), name, pm->rootdir);
 #if MY_STRACE
+        uint8_t *p = mmuV2R(pm, vraw);
+        fprintf(stderr, "/ M3:");
+        for (size_t i = 0; i < MESS_SIZE; ++i) {
+            fprintf(stderr, " %02x", p[i]);
+        }
+        fprintf(stderr, "\n");
         fprintf(stderr, "/ creat(\"%s\", %06o) // name len=%d, full=%s\n", name, mode, m.m3_i1, path0);
 #endif
         ret = creat(path0, mode);
